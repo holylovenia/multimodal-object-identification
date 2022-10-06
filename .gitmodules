@@ -1,0 +1,3 @@
+[submodule "simmc2"]
+	path = simmc2
+	url = https://github.com/facebookresearch/simmc2.git
