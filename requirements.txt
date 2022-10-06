@@ -1,0 +1,5 @@
+python
+torch
+torchvision
+torchaudio
+transformers
