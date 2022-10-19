@@ -1,3 +1,6 @@
 [submodule "simmc2"]
 	path = simmc2
 	url = https://github.com/holylovenia/simmc2.git
+[submodule "detr"]
+	path = detr
+	url = https://github.com/facebookresearch/detr.git
