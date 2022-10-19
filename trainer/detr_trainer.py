@@ -58,7 +58,7 @@ class DetrTrainer(transformers.Trainer):
                 loss = loss.mean().detach()
 
                 if isinstance(outputs, dict):
-                    logits = tuple(v for k, v in outputs.items() if k not in ignore_keys + ["loss"])
+                    logits = tuple(v for k, v in outputs.items() if k not in ignore_keys + ["loss"])[1]
                 else:
                     logits = outputs[1:]
             else:
@@ -66,7 +66,7 @@ class DetrTrainer(transformers.Trainer):
                 with self.compute_loss_context_manager():
                     outputs = model(**inputs)
                 if isinstance(outputs, dict):
-                    logits = tuple(v for k, v in outputs.items() if k not in ignore_keys)
+                    logits = tuple(v for k, v in outputs.items() if k not in ignore_keys)[1]
                 else:
                     logits = outputs
                 # TODO: this needs to be fixed and made cleaner later.
@@ -76,8 +76,10 @@ class DetrTrainer(transformers.Trainer):
         if prediction_loss_only:
             return (loss, None, None)
 
-        logits = transformers.trainer_pt_utils.nested_detach(logits)
-        if len(logits) == 1:
-            logits = logits[0]
+        # print(logits)
+        # logits = logits[0]
+        # logits = transformers.trainer_pt_utils.nested_detach(logits)
+        # if len(logits) == 1:
+        #     logits = logits[0]
 
         return (loss, logits, labels)
