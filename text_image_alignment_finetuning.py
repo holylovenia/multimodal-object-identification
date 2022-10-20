@@ -45,9 +45,21 @@ logger = logging.getLogger(__name__)
 # Main Functions
 #####
 def run(model_args, data_args, training_args):
-    training_args.output_dir="{}/{}".format(training_args.output_dir, model_args.model_name_or_path)
+    training_args.output_dir="{}/{}_{}_lr{}_bs{}".format(
+        training_args.output_dir,
+        model_args.model_name_or_path.replace("/", "_"),
+        training_args.lr_scheduler_type,
+        training_args.learning_rate,
+        training_args.per_device_train_batch_size * training_args.gradient_accumulation_steps
+    )
     os.makedirs(training_args.output_dir, exist_ok=True)
-    cache_dir_path = "./{}/{}".format(data_args.cache_dir_name, model_args.model_name_or_path)
+    cache_dir_path = "{}/{}_{}_lr{}_bs{}".format(
+        data_args.cache_dir_name,
+        model_args.model_name_or_path.replace("/", "_"),
+        training_args.lr_scheduler_type,
+        training_args.learning_rate,
+        training_args.per_device_train_batch_size * training_args.gradient_accumulation_steps
+    )
     os.makedirs(cache_dir_path, exist_ok=True)
 
     # Data loading
@@ -208,11 +220,17 @@ def main():
     ###
     # Init logging
     os.makedirs("./log", exist_ok=True)
+    
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         datefmt="%m/%d/%Y %H:%M:%S",
         handlers=[logging.StreamHandler(sys.stdout), logging.FileHandler(
-            "./log/log__{}".format(model_args.model_name_or_path.replace("/", "_")), mode="w")],
+            "./log/log_{}_{}_lr{}_bs{}".format(
+                model_args.model_name_or_path.replace("/", "_"),
+                training_args.lr_scheduler_type,
+                training_args.learning_rate,
+                training_args.per_device_train_batch_size * training_args.gradient_accumulation_steps
+            ), mode="w")],
     )
     logger.setLevel(logging.INFO if is_main_process(training_args.local_rank) else logging.WARN)
 
