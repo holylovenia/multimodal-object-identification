@@ -201,8 +201,10 @@ def load_image_text_eval_dataset(
     gold_data = json.load(open(raw_data['source_path'],'r'))
     
     dset = {
-        'dialog_id': [], 'turn_id': [], 'object_id': [],
         'dialogue': [], 'image': [], 'bbox': []
+    }
+    meta_dset = {
+        'dialog_id': [], 'turn_id': [], 'object_id': [], 'labels': []
     }
     for row in data:
         # Dialogue idx to labels
@@ -221,7 +223,7 @@ def load_image_text_eval_dataset(
         scene_dict = {}
         for scene_objects in scene['scenes']:
             for obj in scene_objects['objects']:
-                scene_dict[obj['unique_id']] = obj['bbox']
+                scene_dict[obj['index']] = obj['bbox']
 
         image_path = data[0]['image_name']
         for img_dir_path in img_dir_paths:
@@ -231,25 +233,93 @@ def load_image_text_eval_dataset(
 
         dialogue = data[0]["input_text"]
         for obj_id, bbox in scene_dict.items():
-            dset['dialog_id'].append(dialog_id)
-            dset['turn_id'].append(turn_id)
-            dset['object_id'].append(obj_id)
+            meta_dset['dialog_id'].append(dialog_id)
+            meta_dset['turn_id'].append(turn_id)
+            meta_dset['object_id'].append(obj_id)
+            meta_dset['labels'].append(labels)
             dset['dialogue'].append(dialogue)
             dset['image'].append(image_path)
             dset['bbox'].append(bbox)
             
+    meta_dset = datasets.Dataset.from_dict(meta_dset)
     eval_dset = datasets.Dataset.from_dict(dset)
     eval_dset = eval_dset.cast_column("image", datasets.Image(decode=True))
     
-    return eval_dset, gold_data
+    return eval_dset, meta_dset, gold_data
 
-def convert_dialogue_to_caption(example_batch, num_utterances=3):
+###
+# Load Dataset for CLIP Training
+###
+def load_image_text_eval_dataset(
+    scene_dir_path = "./simmc2/data/public", 
+    data_path = './preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_train.json',
+    img_dir_paths = [
+        './simmc2/data/simmc2_scene_images_dstc10_public_part1',
+        './simmc2/data/simmc2_scene_images_dstc10_public_part2'
+    ]
+):
+    with open(data_path, "r") as file_id:
+        raw_data = json.load(file_id)    
+    data = raw_data["data"]
+    gold_data = json.load(open(raw_data['source_path'],'r'))
+    
+    dset = {
+        'dialogue': [], 'image': [], 'bbox': []
+    }
+    meta_dset = {
+        'dialog_id': [], 'turn_id': [], 'object_id': [], 'labels': []
+    }
+    for row in data:
+        # Dialogue idx to labels
+        dialog_id = row['dialog_id']
+        turn_id = row['turn_id']
+        labels = row['ambiguous_candidates']
+
+        # Scene
+        scene_path = row['image_name'].replace('.png','_scene.json')
+        if os.path.exists(f"{scene_dir_path}/{scene_path}"):
+            scene_path = f"{scene_dir_path}/{scene_path}"
+        elif os.path.exists(f"{scene_dir_path}/m_{scene_path}"):
+            scene_path = f"{scene_dir_path}/m_{scene_path}"
+
+        scene = json.load(open(scene_path, 'r'))
+        scene_dict = {}
+        for scene_objects in scene['scenes']:
+            for obj in scene_objects['objects']:
+                if obj['index'] in labels:
+                    scene_dict[obj['index']] = obj['bbox']
+
+        image_path = data[0]['image_name']
+        for img_dir_path in img_dir_paths:
+            if os.path.exists(f'{img_dir_path}/{image_path}'):
+                image_path = f'{img_dir_path}/{image_path}'
+                break
+
+        dialogue = data[0]["input_text"]
+        for obj_id, bbox in scene_dict.items():
+            meta_dset['dialog_id'].append(dialog_id)
+            meta_dset['turn_id'].append(turn_id)
+            meta_dset['object_id'].append(obj_id)
+            meta_dset['labels'].append(labels)
+            dset['dialogue'].append(dialogue)
+            dset['image'].append(image_path)
+            dset['bbox'].append(bbox)
+            
+    meta_dset = datasets.Dataset.from_dict(meta_dset)
+    eval_dset = datasets.Dataset.from_dict(dset)
+    eval_dset = eval_dset.cast_column("image", datasets.Image(decode=True))
+    
+    return eval_dset, meta_dset, gold_data
+
+def convert_dialogue_to_caption(example_batch, num_utterances=3, utterance_turn='both'):
     utterances = []
     for turn_id, turn in enumerate(example_batch['dialogue']):
         if turn_id % 2 == 0:
-            utterances.append("<USER> " + turn)
+            if turn == 'both' or turn =='user':
+                utterances.append("<USER> " + turn)
         else:
-            utterances.append("<SYS> " + turn)
+            if turn == 'both' or turn =='system':
+                utterances.append("<SYS> " + turn)
     example_batch['caption'] = (" ".join(utterances[-num_utterances:])).lower()
     
     return example_batch

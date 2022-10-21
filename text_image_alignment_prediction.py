@@ -1,5 +1,6 @@
 from PIL import ImageFile
 from copy import deepcopy
+import collections
 from datasets import load_from_disk, set_caching_enabled
 from utils import data_utils, utils
 from utils.args_helper import (
@@ -38,6 +39,10 @@ import transformers
 
 from simmc2.model.utils import ambiguous_candidates_evaluation as eval_utils
 from trainer.detr_trainer import DetrTrainer 
+from tqdm import tqdm
+
+from torch.utils.data import DataLoader
+    
 set_caching_enabled(True)
 logger = logging.getLogger(__name__)
 
@@ -55,7 +60,7 @@ def run(model_args, data_args, training_args):
     os.makedirs(training_args.output_dir, exist_ok=True)
     cache_dir_path = "{}/{}_{}_lr{}_bs{}".format(
         data_args.cache_dir_name,
-        model_args.model_name_or_path.replace("/", "_"),
+        model_args.model_name_or_path.replace("/", "_").replace('.',''),
         training_args.lr_scheduler_type,
         training_args.learning_rate,
         training_args.per_device_train_batch_size * training_args.gradient_accumulation_steps
@@ -63,120 +68,169 @@ def run(model_args, data_args, training_args):
     os.makedirs(cache_dir_path, exist_ok=True)
 
     # Data loading
-    eval_dset, gold_data = data_utils.load_image_text_eval_dataset()
-    eval_dset = eval_dset.map(
-        data_utils.convert_dialogue_to_caption,
-        num_proc=data_args.preprocessing_num_workers,
-        desc="convert object attributes to caption",
-        load_from_cache_file=True,
-        cache_file_name=os.path.join(cache_dir_path, "ds_converted.arrow"),
-        fn_kwargs={"num_utterances": data_args.num_utterances},
-        remove_columns=["dialogue"]
-    )
-
-    # Preprocessing
-    tokenizer = transformers.AutoTokenizer.from_pretrained(model_args.model_name_or_path)
-    feature_extractor = transformers.AutoFeatureExtractor.from_pretrained(model_args.model_name_or_path)
-    processor = transformers.VisionTextDualEncoderProcessor(feature_extractor, tokenizer)
+    eval_dset, meta_dset, gold_data = data_utils.load_image_text_eval_dataset()
+    # eval_dset = eval_dset.train_test_split(0.05)['test']
     
-    eval_dset = eval_dset.map(
-        data_utils.tokenize_captions,
-        num_proc=data_args.preprocessing_num_workers,
-        desc="tokenize captions",
-        fn_kwargs={
-            "tokenizer": tokenizer,
-            "max_seq_length": data_args.max_seq_length,
+    if not os.path.exists('./logits.pt'):
+        eval_dset = eval_dset.map(
+            data_utils.convert_dialogue_to_caption,
+            num_proc=data_args.preprocessing_num_workers,
+            desc="convert object attributes to caption",
+            load_from_cache_file=True,
+            cache_file_name=os.path.join(cache_dir_path, "ds_converted.arrow"),
+            fn_kwargs={"num_utterances": data_args.num_utterances},
+            remove_columns=["dialogue"]
+        )
+
+        # Preprocessing
+        tokenizer = transformers.AutoTokenizer.from_pretrained(model_args.model_name_or_path)
+        feature_extractor = transformers.AutoFeatureExtractor.from_pretrained(model_args.model_name_or_path)
+        processor = transformers.CLIPProcessor(feature_extractor, tokenizer)
+
+        eval_dset = eval_dset.map(
+            data_utils.tokenize_captions,
+            num_proc=data_args.preprocessing_num_workers,
+            desc="tokenize captions",
+            fn_kwargs={
+                "tokenizer": tokenizer,
+                "max_seq_length": data_args.max_seq_length,
+            }
+        )
+        normalize = Normalize(mean=feature_extractor.image_mean, std=feature_extractor.image_std)
+        eval_transforms = Compose(
+            [
+                Resize(feature_extractor.size),
+                CenterCrop(feature_extractor.size),
+                ToTensor(),
+                normalize,
+            ]
+        )
+
+        def eval_image_preprocess(example_batch):            
+            images = [
+                eval_transforms(
+                    image.convert("RGB").crop((
+                        bbox[0], bbox[1], bbox[0]+max(5, bbox[3]), bbox[1]+max(5, bbox[2])
+                    ))
+                )
+                for image, bbox in zip(example_batch["image"], example_batch["bbox"])
+            ]
+            captions = [caption for caption in example_batch["caption"]]
+            example_batch["pixel_values"] = feature_extractor(
+                images=images, text=captions, return_tensors="pt")["pixel_values"]
+            return example_batch
+
+        eval_dset = eval_dset.with_transform(eval_image_preprocess)
+
+        # Training and evaluation
+        model = transformers.CLIPModel.from_pretrained(model_args.model_name_or_path)
+
+        def collate_fn(examples):
+            pixel_values = torch.stack([example["pixel_values"] for example in examples])
+            input_ids = torch.tensor([example["input_ids"] for example in examples], dtype=torch.long)
+            attention_mask = torch.tensor([example["attention_mask"] for example in examples], dtype=torch.long)
+            return {
+                "pixel_values": pixel_values,
+                "input_ids": input_ids,
+                "attention_mask": attention_mask,
+                "return_loss": True,
         }
-    )
 
-    normalize = Normalize(mean=feature_extractor.image_mean, std=feature_extractor.image_std)
-    eval_transforms = Compose(
-        [
-            Resize(feature_extractor.size),
-            CenterCrop(feature_extractor.size),
-            ToTensor(),
-            normalize,
-        ]
-    )
+        trainer = DetrTrainer(
+            model=model,
+            args=training_args,
+            data_collator=collate_fn,
+            train_dataset=None,
+            eval_dataset=None,
+            tokenizer=processor
+        )
 
-    def eval_image_preprocess(example_batch):            
-        images = [
-            eval_transforms(
-                image.convert("RGB").crop((
-                    bbox[0], bbox[1], bbox[0]+max(5, bbox[3]), bbox[1]+max(5, bbox[2])
-                ))
-            )
-            for image, bbox in zip(example_batch["image"], example_batch["bbox"])
-        ]
-        captions = [caption for caption in example_batch["caption"]]
-        example_batch["pixel_values"] = feature_extractor(
-            images=images, text=captions, return_tensors="pt")["pixel_values"]
-        return example_batch
+        # Evaluation
+        # predictions = trainer.predict(eval_dset)
 
-    eval_dset = eval_dset.with_transform(eval_image_preprocess)
+        dataloader = DataLoader(
+            eval_dset, shuffle=False,
+            batch_size=training_args.per_device_train_batch_size, 
+            num_workers=training_args.dataloader_num_workers,
+            collate_fn=collate_fn
+        )
 
-    # Training and evaluation
-    def collate_fn(examples):
-        pixel_values = torch.stack([example["pixel_values"] for example in examples])
-        input_ids = torch.tensor([example["input_ids"] for example in examples], dtype=torch.long)
-        attention_mask = torch.tensor([example["attention_mask"] for example in examples], dtype=torch.long)
-        return {
-            "pixel_values": pixel_values,
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-            "return_loss": True,
-    }
+        print('Performing inference on test data...')
+        model = model.cuda()
+        logits_batch = []
+        for batch in tqdm(dataloader):
+            batch["pixel_values"] = batch["pixel_values"].cuda()
+            batch["input_ids"] = batch["input_ids"].cuda()
+            batch["attention_mask"] = batch["attention_mask"].cuda()
+            outputs = model(**batch)
+            logits_batch.append(outputs.logits_per_image.diagonal().cpu().detach().numpy())
+        logits = np.concatenate(logits_batch)
 
-    model = transformers.VisionTextDualEncoderModel.from_pretrained(model_args.model_name_or_path)
+        torch.save(logits, open('logits.pt', 'wb'))
+    else:
+        logits = torch.load(open('logits.pt', 'rb'))
 
-    def compute_metrics(p):
+    # Compute Metrics
+    def compute_metrics(logits):
         """Aggregate predictions & compute evaluation metric per utterance"""
-        def sigmoid_array(x):                                        
-            return 1 / (1 + np.exp(-x))
-        preds = sigmoid_array(p.predictions, axis=1) # Assume this is logits_per_image
-        
-        pred_dict = {'dialog_id': [], 'turn_id': [], 'pred': []}
-        for row, pred in zip(eval_dset, preds):
-            pred_dict['dialog_id'] = row.dialog_id
-            pred_dict['turn_id'] = row.turn_id
-            pred_dict['pred'] = prediction
-            
+
+        print('Collecting metadata for predictions...')
+        pred_dict = {'dialog_id': [], 'turn_id': [], 'object_id': [], 'logit': [], 'num_labels': []}
+        for row, logit in tqdm(zip(meta_dset, logits)):
+            pred_dict['dialog_id'].append(row['dialog_id'])
+            pred_dict['turn_id'].append(row['turn_id'])
+            pred_dict['object_id'].append(row['object_id'])
+            pred_dict['num_labels'].append(len(row['labels']))
+            pred_dict['logit'].append(logit)
+
+        print('Aggregating predictions...')
         df = pd.DataFrame(pred_dict)
-        agg_preds = df.groupby(['dialog_id','turn_id'])['pred'].apply(list).reset_index().to_dict(orient='records')
-        
+        agg_preds = df.groupby(['dialog_id','turn_id','num_labels']).agg({'object_id': list, 'logit': list})
+        agg_preds = agg_preds.reset_index().to_dict(orient='records')
+
+        print('Filtering per utterance predictions...')
         results = collections.defaultdict(list)
         for agg_pred in agg_preds:
-            dialog_id, turn_id, preds = agg_pred['dialog_id'], agg_pred['turn_id'], agg_pred['pred']                
+            dialog_id, turn_id, num_labels = agg_pred['dialog_id'], agg_pred['turn_id'], agg_pred['num_labels']
+            object_ids, logits = np.array(agg_pred['object_id']), np.array(agg_pred['logit'])
+
+            # ORACLE
+            indexes = np.argpartition(logits, -num_labels)[-num_labels:]
+
+            # Top-k
+            # indexes = np.argpartition(logits, -min(len(logits), 15))[-min(len(logits), 30):]
+
+            # THRESHOLD
+            # indexes =  np.where(logits > np.min(logits))[0]
+            # indexes =  np.where(logits > np.median(logits))[0]
+            acc_object_ids = object_ids[indexes].tolist()
+
             new_instance = {
                 "turn_id": turn_id,
-                "disambiguation_candidates": preds
+                "disambiguation_candidates": acc_object_ids
             }
             results[dialog_id].append(new_instance)
 
         # Restructure results JSON and save.
+        print('Compariong predictions with grountruths...')
         results = [{
             "dialog_id": dialog_id,
             "predictions": predictions,
         } for dialog_id, predictions in results.items()]
-        
-        metrics = eval_utils.evaluate_ambiguous_candidates(gold_data, results)
-        
-        print('Eval Metrics', metrics["recall"], metrics["precision"], metrics["f1"])
-        return metrics
-    
-    trainer = DetrTrainer(
-        model=model,
-        args=training_args,
-        data_collator=collate_fn,
-        train_dataset=None,
-        eval_dataset=None,
-        tokenizer=processor,
-        compute_metrics=compute_metrics
-    )
 
-    # Evaluation
-    metrics = trainer.evaluate(eval_dset)
-    print('Metrics', metrics)
+        metrics = eval_utils.evaluate_ambiguous_candidates(gold_data, results)
+
+        print('== Eval Metrics ==')
+        print('Recall: ', metrics["recall"])
+        print('Precision: ', metrics["precision"])
+        print('F1-Score: ', metrics["f1"])
+
+        return metrics
+
+    print('Calculating evaluation metrics...')
+    metrics = compute_metrics(logits)
+    
+    # Report Metrics
     trainer.log_metrics("test", metrics)
     trainer.save_metrics("test", metrics)    
 
