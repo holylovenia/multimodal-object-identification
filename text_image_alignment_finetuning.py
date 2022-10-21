@@ -65,11 +65,10 @@ def run(model_args, data_args, training_args):
     print(raw_datasets["test"][0])
 
     # Preprocessing
-    tokenizer = transformers.AutoTokenizer.from_pretrained(model_args.text_model_name_or_path)
-    feature_extractor = transformers.AutoFeatureExtractor.from_pretrained(model_args.vision_model_name_or_path)
-    processor = transformers.VisionTextDualEncoderProcessor(feature_extractor, tokenizer)
+    tokenizer = transformers.AutoTokenizer.from_pretrained(model_args.model_name_or_path)
+    feature_extractor = transformers.AutoFeatureExtractor.from_pretrained(model_args.model_name_or_path)
+    processor = transformers.AutoProcessor.from_pretrained(model_args.model_name_or_path)
 
-    proc_datasets = deepcopy(raw_datasets)
     proc_datasets = raw_datasets.map(
         data_utils.tokenize_captions,
         num_proc=data_args.preprocessing_num_workers,
@@ -146,8 +145,8 @@ def run(model_args, data_args, training_args):
             "return_loss": True,
     }
 
-    model = transformers.VisionTextDualEncoderModel.from_vision_text_pretrained(
-        model_args.vision_model_name_or_path, model_args.text_model_name_or_path
+    model = transformers.AutoModel.from_pretrained(
+        model_args.model_name_or_path
     )
     
     trainer = transformers.Trainer(

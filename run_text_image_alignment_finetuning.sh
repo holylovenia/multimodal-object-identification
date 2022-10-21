@@ -1,7 +1,7 @@
-CUDA_VISIBLE_DEVICES=1 python text_image_alignment_finetuning.py \
+CUDA_VISIBLE_DEVICES=0 python text_image_alignment_finetuning.py \
     --output_dir="./save/text-im-align" \
     --cache_dir="./cache/text-im-align" \
-    --model_name_or_path="CLIP/vit-base-patch32__roberta-base" \
+    --model_name_or_path="openai/clip-vit-base-patch32" \
     --vision_model_name_or_path="openai/clip-vit-base-patch32" \
     --text_model_name_or_path="roberta-base" \
     --per_device_train_batch_size=16 \

@@ -1,4 +1,4 @@
-CUDA_VISIBLE_DEVICES=0 python object_detection_finetuning.py \
+CUDA_VISIBLE_DEVICES=1 python object_detection_finetuning.py \
     --output_dir="./save/obj-det" \
     --cache_dir="./cache/obj-det" \
     --model_name_or_path="facebook/detr-resnet-50" \
