@@ -63,18 +63,16 @@ def run(model_args, data_args, training_args):
     os.makedirs(cache_dir_path, exist_ok=True)
 
     # Data loading
-    dataset = data_utils.load_image_text_dataset()
+    dataset = data_utils.load_image_text_eval_dataset(return_gt_labels=False)
     dataset = dataset.map(
-        data_utils.convert_attrs_to_caption,
+        data_utils.convert_dialogue_to_caption,
         num_proc=data_args.preprocessing_num_workers,
-        desc="convert object attributes to caption",
+        desc="convert dialogue to caption",
         load_from_cache_file=True,
         cache_file_name=os.path.join(cache_dir_path, "ds_converted.arrow")
     )
     raw_datasets = dataset.train_test_split(0.1)
     raw_datasets["all"] = dataset
-
-    print(raw_datasets["test"][0])
 
     # Preprocessing
     tokenizer = transformers.AutoTokenizer.from_pretrained(model_args.model_name_or_path)
@@ -120,22 +118,28 @@ def run(model_args, data_args, training_args):
         )
 
     def train_image_preprocess(example_batch):
-        # print("train", example_batch["bbox"])
         images = [
-            # idk why but it seems like the bbox's dim 2 and 3 are swapped, so let's swap them
-            train_transforms(image.convert("RGB").crop((bbox[0], bbox[1], bbox[0]+bbox[3], bbox[1]+bbox[2]))) \
-            for image, bbox in zip(example_batch["image"], example_batch["bbox"])]
+            train_transforms(
+                image.convert("RGB").crop((
+                    bbox[0], bbox[1], bbox[0]+max(5, bbox[3]), bbox[1]+max(5, bbox[2])
+                ))
+            )
+            for image, bbox in zip(example_batch["image"], example_batch["bbox"])
+        ]
         captions = [caption for caption in example_batch["caption"]]
         example_batch["pixel_values"] = feature_extractor(
             images=images, text=captions, return_tensors="pt")["pixel_values"]
         return example_batch
 
     def eval_image_preprocess(example_batch):
-        # print("eval", example_batch["bbox"])
         images = [
-            # idk why but it seems like the bbox's dim 2 and 3 are swapped, so let's swap them
-            eval_transforms(image.convert("RGB").crop((bbox[0], bbox[1], bbox[0]+bbox[3], bbox[1]+bbox[2]))) \
-            for image, bbox in zip(example_batch["image"], example_batch["bbox"])]
+            eval_transforms(
+                image.convert("RGB").crop((
+                    bbox[0], bbox[1], bbox[0]+max(5, bbox[3]), bbox[1]+max(5, bbox[2])
+                ))
+            )
+            for image, bbox in zip(example_batch["image"], example_batch["bbox"])
+        ]
         captions = [caption for caption in example_batch["caption"]]
         example_batch["pixel_values"] = feature_extractor(
             images=images, text=captions, return_tensors="pt")["pixel_values"]

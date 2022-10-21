@@ -1,7 +1,9 @@
-CUDA_VISIBLE_DEVICES=1 python object_detection_finetuning.py \
-    --output_dir="./save/obj-det" \
-    --cache_dir="./cache/obj-det" \
-    --model_name_or_path="facebook/detr-resnet-50" \
+CUDA_VISIBLE_DEVICES=0 python conv_image_alignment_finetuning.py \
+    --output_dir="./save/conv-im-align" \
+    --cache_dir="./cache/conv-im-align" \
+    --model_name_or_path="openai/clip-vit-base-patch32" \
+    --vision_model_name_or_path="openai/clip-vit-base-patch32" \
+    --text_model_name_or_path="roberta-base" \
     --per_device_train_batch_size=16 \
     --per_device_eval_batch_size=16 \
     --num_train_epochs=200 \

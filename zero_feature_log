@@ -1,0 +1,18 @@
+/home/holy/projects/ambiguous-mm-dialogue/simmc2/model/ambiguous_candidates
+Loading: /home/holy/projects/ambiguous-mm-dialogue/preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_train.json
+Loading: /home/holy/projects/ambiguous-mm-dialogue/preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_dev.json
+Loading: /home/holy/projects/ambiguous-mm-dialogue/preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_devtest.json
+=== train
+zero|cloth_store_1416238_woman_20_6.png
+zero|cloth_store_1416238_woman_20_6.png
+zero|cloth_store_1416238_woman_20_6.png
+zero|cloth_store_1416238_woman_19_0.png
+zero|cloth_store_1416238_woman_19_0.png
+zero|cloth_store_1416238_woman_19_0.png
+zero|cloth_store_1416238_woman_19_0.png
+zero|cloth_store_1416238_woman_20_6.png
+zero|cloth_store_1416238_woman_20_6.png
+zero|cloth_store_1416238_woman_20_6.png
+zero|cloth_store_1416238_woman_4_8.png
+=== val
+=== devtest

@@ -193,7 +193,8 @@ def load_image_text_eval_dataset(
     img_dir_paths = [
         './simmc2/data/simmc2_scene_images_dstc10_public_part1',
         './simmc2/data/simmc2_scene_images_dstc10_public_part2'
-    ]
+    ],
+    return_gt_labels=True,
 ):
     with open(data_path, "r") as file_id:
         raw_data = json.load(file_id)    
@@ -245,7 +246,10 @@ def load_image_text_eval_dataset(
     eval_dset = datasets.Dataset.from_dict(dset)
     eval_dset = eval_dset.cast_column("image", datasets.Image(decode=True))
     
-    return eval_dset, meta_dset, gold_data
+    if return_gt_labels:
+        return eval_dset, meta_dset, gold_data
+    else:
+        return eval_dset
 
 def convert_dialogue_to_caption(example_batch, num_utterances=3, utterance_turn='both'):
     utterances = []
