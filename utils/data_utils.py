@@ -2,7 +2,9 @@ import datasets
 import json
 import os
 
-
+###
+# Load Object Categories in SIMMC Dataset
+###
 def load_categories(
     fashion_prefab_path="./simmc2/data/fashion_prefab_metadata_all.json",
     furniture_prefab_path="./simmc2/data/furniture_prefab_metadata_all.json",
@@ -38,7 +40,9 @@ def load_categories(
     
     return categories
 
-
+###
+# Load Objects in Scene for DETR Training
+###
 def load_objects_in_scenes_dataset(
     mapping,
     img_dir_paths=[
@@ -107,7 +111,9 @@ def compute_image_area(example_batch):
         example_batch["objects"][i]["area"] = area
     return example_batch
 
-
+###
+# Load Image Text Dataset for CLIP Fine-Tuning
+###
 def load_image_text_dataset(
     img_dir_paths=[
         "./simmc2/data/simmc2_scene_images_dstc10_public_part1",
@@ -176,4 +182,74 @@ def tokenize_captions(example_batch, tokenizer, max_seq_length):
     text_inputs = tokenizer(example_batch["caption"], max_length=max_seq_length, padding="max_length", truncation=True)
     example_batch["input_ids"] = text_inputs.input_ids
     example_batch["attention_mask"] = text_inputs.attention_mask
+    return example_batch
+
+###
+# Load Dataset for CLIP Evaluation
+###
+def load_image_text_eval_dataset(
+    scene_dir_path = "./simmc2/data/public", 
+    data_path = './preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_devtest.json',
+    img_dir_paths = [
+        './simmc2/data/simmc2_scene_images_dstc10_public_part1',
+        './simmc2/data/simmc2_scene_images_dstc10_public_part2'
+    ]
+):
+    with open(data_path, "r") as file_id:
+        raw_data = json.load(file_id)    
+    data = raw_data["data"]
+    gold_data = json.load(open(raw_data['source_path'],'r'))
+    
+    dset = {
+        'dialog_id': [], 'turn_id': [], 'object_id': [],
+        'dialogue': [], 'image': [], 'bbox': []
+    }
+    for row in data:
+        # Dialogue idx to labels
+        dialog_id = row['dialog_id']
+        turn_id = row['turn_id']
+        labels = row['ambiguous_candidates']
+
+        # Scene
+        scene_path = row['image_name'].replace('.png','_scene.json')
+        if os.path.exists(f"{scene_dir_path}/{scene_path}"):
+            scene_path = f"{scene_dir_path}/{scene_path}"
+        elif os.path.exists(f"{scene_dir_path}/m_{scene_path}"):
+            scene_path = f"{scene_dir_path}/m_{scene_path}"
+
+        scene = json.load(open(scene_path, 'r'))
+        scene_dict = {}
+        for scene_objects in scene['scenes']:
+            for obj in scene_objects['objects']:
+                scene_dict[obj['unique_id']] = obj['bbox']
+
+        image_path = data[0]['image_name']
+        for img_dir_path in img_dir_paths:
+            if os.path.exists(f'{img_dir_path}/{image_path}'):
+                image_path = f'{img_dir_path}/{image_path}'
+                break
+
+        dialogue = data[0]["input_text"]
+        for obj_id, bbox in scene_dict.items():
+            dset['dialog_id'].append(dialog_id)
+            dset['turn_id'].append(turn_id)
+            dset['object_id'].append(obj_id)
+            dset['dialogue'].append(dialogue)
+            dset['image'].append(image_path)
+            dset['bbox'].append(bbox)
+            
+    eval_dset = datasets.Dataset.from_dict(dset)
+    eval_dset = eval_dset.cast_column("image", datasets.Image(decode=True))
+    
+    return eval_dset, gold_data
+
+def convert_dialogue_to_caption(example_batch, num_utterances=3):
+    utterances = []
+    for turn_id, turn in enumerate(example_batch['dialogue']):
+        if turn_id % 2 == 0:
+            utterances.append("<USER> " + turn)
+        else:
+            utterances.append("<SYS> " + turn)
+    example_batch['caption'] = (" ".join(utterances[-num_utterances:])).lower()
+    
     return example_batch

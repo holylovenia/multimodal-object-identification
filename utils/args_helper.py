@@ -38,6 +38,9 @@ class DataArguments:
     preprocessed_data_dir: Optional[str] = field(
         default="./preprocessed_data"
     )
+    num_utterances: Optional[int] = field(
+        default=3
+    )
 
 @dataclass
 class TrainingArguments(TrainingArguments):

@@ -37,7 +37,8 @@ class DetrTrainer(transformers.Trainer):
             Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]: A tuple with the loss,
             logits and labels (each being optional).
         """
-        has_labels = all(inputs.get(k) is not None for k in self.label_names)
+        probably_labels = [inputs.get(k) is not None for k in self.label_names]
+        has_labels = all(probably_labels) and len(probably_labels) > 0
         inputs = self._prepare_inputs(inputs)
         if ignore_keys is None:
             if hasattr(self.model, "config"):
