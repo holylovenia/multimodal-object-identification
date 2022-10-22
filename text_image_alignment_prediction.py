@@ -71,7 +71,7 @@ def run(model_args, data_args, training_args):
     eval_dset, meta_dset, gold_data = data_utils.load_image_text_eval_dataset()
     # eval_dset = eval_dset.train_test_split(0.05)['test']
     
-    if (data_args.prediction_path is None or os.path.exists(data_args.prediction_path)):
+    if (data_args.prediction_path is None or not os.path.exists(data_args.prediction_path)):
         eval_dset = eval_dset.map(
             data_utils.convert_dialogue_to_caption,
             num_proc=data_args.preprocessing_num_workers,
@@ -81,7 +81,7 @@ def run(model_args, data_args, training_args):
             fn_kwargs={"num_utterances": data_args.num_utterances},
             remove_columns=["dialogue"]
         )
-
+        
         # Preprocessing
         tokenizer = transformers.AutoTokenizer.from_pretrained(model_args.model_name_or_path)
         feature_extractor = transformers.AutoFeatureExtractor.from_pretrained(model_args.model_name_or_path)
@@ -96,6 +96,7 @@ def run(model_args, data_args, training_args):
                 "max_seq_length": data_args.max_seq_length,
             }
         )
+        
         normalize = Normalize(mean=feature_extractor.image_mean, std=feature_extractor.image_std)
         eval_transforms = Compose(
             [
@@ -166,7 +167,7 @@ def run(model_args, data_args, training_args):
             logits_batch.append(outputs.logits_per_image.diagonal().cpu().detach().numpy())
         logits = np.concatenate(logits_batch)
 
-        data_args.prediction_path = f'{training_args.output_dir}/prediction_logits.pt'
+        data_args.prediction_path = f'{cache_dir_path}/prediction_logits.pt'
         torch.save(logits, open(data_args.prediction_path, 'wb'))
     else:
         logits = torch.load(open(data_args.prediction_path, 'rb'))
@@ -196,10 +197,10 @@ def run(model_args, data_args, training_args):
             object_ids, logits = np.array(agg_pred['object_id']), np.array(agg_pred['logit'])
 
             # ORACLE
-            indexes = np.argpartition(logits, -num_labels)[-num_labels:]
+            # indexes = np.argpartition(logits, -num_labels)[-num_labels:]
 
             # Top-k
-            # indexes = np.argpartition(logits, -min(len(logits), 15))[-min(len(logits), 30):]
+            indexes = np.argpartition(logits, -min(len(logits), 15))[-min(len(logits), 15):]
 
             # THRESHOLD
             # indexes =  np.where(logits > np.min(logits))[0]
