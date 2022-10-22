@@ -2,6 +2,7 @@ from PIL import ImageFile
 from copy import deepcopy
 from datasets import load_from_disk, set_caching_enabled
 from detr import CocoEvaluator
+from model.clipper import CLIPPERModel
 from utils import data_utils, utils
 from utils.args_helper import (
     DataArguments,
@@ -73,6 +74,7 @@ def run(model_args, data_args, training_args):
     raw_datasets["devtest"] = data_utils.load_image_conv_dataset(
         data_path="./preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_devtest.json",
         return_gt_labels=False)
+
     raw_datasets = raw_datasets.map(
         data_utils.convert_dialogue_to_caption,
         num_proc=data_args.preprocessing_num_workers,
@@ -165,14 +167,18 @@ def run(model_args, data_args, training_args):
         pixel_values = torch.stack([example["pixel_values"] for example in examples])
         input_ids = torch.tensor([example["input_ids"] for example in examples], dtype=torch.long)
         attention_mask = torch.tensor([example["attention_mask"] for example in examples], dtype=torch.long)
+        object_ids = torch.tensor([example["object_id"] for example in examples])
+        prefab_object_ids = torch.tensor([example["prefab_object_id"] for example in examples])
         return {
             "pixel_values": pixel_values,
             "input_ids": input_ids,
             "attention_mask": attention_mask,
             "return_loss": True,
+            "object_ids": object_ids,
+            "prefab_object_ids": prefab_object_ids,
     }
 
-    model = transformers.AutoModel.from_pretrained(
+    model = CLIPPERModel.from_pretrained(
         model_args.model_name_or_path
     )
     
