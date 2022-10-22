@@ -71,7 +71,7 @@ def run(model_args, data_args, training_args):
     eval_dset, meta_dset, gold_data = data_utils.load_image_text_eval_dataset()
     # eval_dset = eval_dset.train_test_split(0.05)['test']
     
-    if not os.path.exists('./logits.pt'):
+    if (data_args.prediction_path is None or os.path.exists(data_args.prediction_path)):
         eval_dset = eval_dset.map(
             data_utils.convert_dialogue_to_caption,
             num_proc=data_args.preprocessing_num_workers,
@@ -166,9 +166,10 @@ def run(model_args, data_args, training_args):
             logits_batch.append(outputs.logits_per_image.diagonal().cpu().detach().numpy())
         logits = np.concatenate(logits_batch)
 
-        torch.save(logits, open('logits.pt', 'wb'))
+        data_args.prediction_path = f'{training_args.output_dir}/prediction_logits.pt'
+        torch.save(logits, open(data_args.prediction_path, 'wb'))
     else:
-        logits = torch.load(open('logits.pt', 'rb'))
+        logits = torch.load(open(data_args.prediction_path, 'rb'))
 
     # Compute Metrics
     def compute_metrics(logits):

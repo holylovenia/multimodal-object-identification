@@ -44,6 +44,9 @@ class DataArguments:
     utterance_turn: Optional[str] = field(
         default='both'
     )
+    prediction_path: Optional[str] = field(
+        default=None
+    )
 
 @dataclass
 class TrainingArguments(TrainingArguments):
