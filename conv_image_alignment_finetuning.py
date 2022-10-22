@@ -63,16 +63,27 @@ def run(model_args, data_args, training_args):
     os.makedirs(cache_dir_path, exist_ok=True)
 
     # Data loading
-    dataset = data_utils.load_image_text_eval_dataset(return_gt_labels=False)
-    dataset = dataset.map(
+    raw_datasets = datasets.DatasetDict()
+    raw_datasets["train"] = data_utils.load_image_conv_dataset(
+        data_path="./preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_train.json",
+        return_gt_labels=False)
+    raw_datasets["dev"] = data_utils.load_image_conv_dataset(
+        data_path="./preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_dev.json",
+        return_gt_labels=False)
+    raw_datasets["devtest"] = data_utils.load_image_conv_dataset(
+        data_path="./preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_devtest.json",
+        return_gt_labels=False)
+    raw_datasets = raw_datasets.map(
         data_utils.convert_dialogue_to_caption,
         num_proc=data_args.preprocessing_num_workers,
         desc="convert dialogue to caption",
         load_from_cache_file=True,
-        cache_file_name=os.path.join(cache_dir_path, "ds_converted.arrow")
+        cache_file_names={
+            "train": os.path.join(cache_dir_path, "train_converted.arrow"),
+            "dev": os.path.join(cache_dir_path, "dev_converted.arrow"),
+            "devtest": os.path.join(cache_dir_path, "devtest_converted.arrow"),
+        }
     )
-    raw_datasets = dataset.train_test_split(0.1)
-    raw_datasets["all"] = dataset
 
     # Preprocessing
     tokenizer = transformers.AutoTokenizer.from_pretrained(model_args.model_name_or_path)
@@ -85,9 +96,9 @@ def run(model_args, data_args, training_args):
         desc="tokenize captions",
         load_from_cache_file=True,
         cache_file_names={
-            "train": os.path.join(cache_dir_path, "train_ds_tokenized.arrow"),
-            "test": os.path.join(cache_dir_path, "test_ds_tokenized.arrow"),
-            "all": os.path.join(cache_dir_path, "all_ds_tokenized.arrow"),
+            "train": os.path.join(cache_dir_path, "train_tokenized.arrow"),
+            "dev": os.path.join(cache_dir_path, "dev_tokenized.arrow"),
+            "devtest": os.path.join(cache_dir_path, "devtest_tokenized.arrow"),
         },
         fn_kwargs={
             "tokenizer": tokenizer,
@@ -146,8 +157,8 @@ def run(model_args, data_args, training_args):
         return example_batch
 
     proc_datasets["train"] = proc_datasets["train"].with_transform(train_image_preprocess)
-    proc_datasets["test"] = proc_datasets["test"].with_transform(eval_image_preprocess)
-    proc_datasets["all"] = proc_datasets["all"].with_transform(eval_image_preprocess)
+    proc_datasets["dev"] = proc_datasets["dev"].with_transform(eval_image_preprocess)
+    proc_datasets["devtest"] = proc_datasets["devtest"].with_transform(eval_image_preprocess)
 
     # Training and evaluation
     def collate_fn(examples):
@@ -170,7 +181,7 @@ def run(model_args, data_args, training_args):
         args=training_args,
         data_collator=collate_fn,
         train_dataset=proc_datasets["train"],
-        eval_dataset=proc_datasets["test"],
+        eval_dataset=proc_datasets["dev"],
         tokenizer=processor,
         callbacks=[transformers.EarlyStoppingCallback(early_stopping_patience=10)],
     )
@@ -180,13 +191,13 @@ def run(model_args, data_args, training_args):
     trainer.save_model()
 
     # Evaluation
-    metrics = trainer.evaluate(proc_datasets["test"])
-    trainer.log_metrics("test", metrics)
-    trainer.save_metrics("test", metrics)
+    metrics = trainer.evaluate(proc_datasets["dev"])
+    trainer.log_metrics("dev", metrics)
+    trainer.save_metrics("dev", metrics)
 
-    metrics = trainer.evaluate(proc_datasets["all"])
-    trainer.log_metrics("all", metrics)
-    trainer.save_metrics("all", metrics)
+    metrics = trainer.evaluate(proc_datasets["devtest"])
+    trainer.log_metrics("devtest", metrics)
+    trainer.save_metrics("devtest", metrics)
     
 
 def main():
