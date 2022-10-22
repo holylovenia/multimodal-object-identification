@@ -200,6 +200,7 @@ def load_image_conv_dataset(
     
     dset = {
         'dialog_id': [], 'turn_id': [], 'object_id': [],
+        'prefab_object_id': [],
         'dialogue': [], 'image': [], 'bbox': []
     }
     for row in data:
@@ -219,8 +220,8 @@ def load_image_conv_dataset(
         scene_dict = {}
         for scene_objects in scene['scenes']:
             for obj in scene_objects['objects']:
-                if obj["index"] in labels:
-                    scene_dict[obj['index']] = obj['bbox']
+                if obj["index"] in labels: # ambigous conv-image pair
+                    scene_dict[obj['index']] = (obj['bbox'], obj['unique_id'])
 
         image_path = data[0]['image_name']
         for img_dir_path in img_dir_paths:
@@ -229,10 +230,11 @@ def load_image_conv_dataset(
                 break
 
         dialogue = data[0]["input_text"]
-        for obj_id, bbox in scene_dict.items():
+        for obj_id, (bbox, prefab_obj_id) in scene_dict.items():
             dset['dialog_id'].append(dialog_id)
             dset['turn_id'].append(turn_id)
             dset['object_id'].append(obj_id)
+            dset['prefab_object_id'].append(prefab_obj_id)
             dset['dialogue'].append(dialogue)
             dset['image'].append(image_path)
             dset['bbox'].append(bbox)
@@ -316,11 +318,10 @@ def convert_dialogue_to_caption(example_batch, num_utterances=3, utterance_turn=
     utterances = []
     for turn_id, turn in enumerate(example_batch['dialogue']):
         if turn_id % 2 == 0:
-            if turn == 'both' or turn =='user':
+            if utterance_turn == 'both' or utterance_turn =='user':
                 utterances.append("<USER> " + turn)
         else:
-            if turn == 'both' or turn =='system':
+            if utterance_turn == 'both' or utterance_turn =='system':
                 utterances.append("<SYS> " + turn)
     example_batch['caption'] = (" ".join(utterances[-num_utterances:])).lower()
-    
     return example_batch
