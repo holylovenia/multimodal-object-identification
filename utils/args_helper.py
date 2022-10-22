@@ -41,6 +41,12 @@ class DataArguments:
     num_utterances: Optional[int] = field(
         default=3
     )
+    utterance_turn: Optional[str] = field(
+        default='both'
+    )
+    prediction_path: Optional[str] = field(
+        default=None
+    )
 
 @dataclass
 class TrainingArguments(TrainingArguments):
