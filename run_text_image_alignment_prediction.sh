@@ -13,4 +13,5 @@ CUDA_VISIBLE_DEVICES=1 python3 text_image_alignment_prediction.py \
     --dataloader_num_workers=8 \
     --overwrite_output_dir=True \
     --utterance_turn both \
-    --num_utterances 3     
+    --num_utterances 3 \
+    --prediction_path="./cache/text-im-align/_save_conv-im-align_openai_clip-vit-base-patch32_linear_lr00001_bs256_linear_lr5e-05_bs128/prediction_logits.pt"
