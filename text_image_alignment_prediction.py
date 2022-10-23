@@ -196,15 +196,24 @@ def run(model_args, data_args, training_args):
             dialog_id, turn_id, num_labels = agg_pred['dialog_id'], agg_pred['turn_id'], agg_pred['num_labels']
             object_ids, logits = np.array(agg_pred['object_id']), np.array(agg_pred['logit'])
 
+            # ALL
+            # indexes = range(len(logits))
+
             # ORACLE
+            # logits = torch.sigmoid(torch.from_numpy(logits))
+            # logits = np.array(logits)
             # indexes = np.argpartition(logits, -num_labels)[-num_labels:]
 
             # Top-k
-            indexes = np.argpartition(logits, -min(len(logits), 15))[-min(len(logits), 15):]
+            # indexes = np.argpartition(logits, -min(len(logits), 15))[-min(len(logits), 15):]
 
             # THRESHOLD
+            # indexes =  np.where(logits > np.mean(logits))[0]
             # indexes =  np.where(logits > np.min(logits))[0]
             # indexes =  np.where(logits > np.median(logits))[0]
+            # print(logits)
+            logits = torch.sigmoid(torch.from_numpy(logits))
+            indexes = np.where(logits >= 0.5)[0]
             acc_object_ids = object_ids[indexes].tolist()
 
             new_instance = {
@@ -214,12 +223,16 @@ def run(model_args, data_args, training_args):
             results[dialog_id].append(new_instance)
 
         # Restructure results JSON and save.
-        print('Compariong predictions with grountruths...')
+        print('Compariong predictions with ground truths...')
         results = [{
             "dialog_id": dialog_id,
             "predictions": predictions,
         } for dialog_id, predictions in results.items()]
 
+        # print("results", results[0])
+        # print()
+        # print("gold_data", gold_data["dialogue_data"][0])
+        # print()
         metrics = eval_utils.evaluate_ambiguous_candidates(gold_data, results)
 
         print('== Eval Metrics ==')
