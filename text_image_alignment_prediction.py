@@ -197,10 +197,10 @@ def run(model_args, data_args, training_args):
             object_ids, logits = np.array(agg_pred['object_id']), np.array(agg_pred['logit'])
 
             # ORACLE
-            # indexes = np.argpartition(logits, -num_labels)[-num_labels:]
+            indexes = np.argpartition(logits, -num_labels)[-num_labels:]
 
             # Top-k
-            indexes = np.argpartition(logits, -min(len(logits), 15))[-min(len(logits), 15):]
+            # indexes = np.argpartition(logits, -min(len(logits), 15))[-min(len(logits), 15):]
 
             # THRESHOLD
             # indexes =  np.where(logits > np.min(logits))[0]
