@@ -10,7 +10,10 @@ import torch.nn as nn
 
 # contrastive loss function, adapted from
 # https://sachinruk.github.io/blog/pytorch/pytorch%20lightning/loss%20function/gpu/2021/03/07/CLIP.html
-def contrastive_loss(logits: torch.Tensor, prefab_object_ids: torch.LongTensor) -> torch.Tensor:
+def contrastive_loss(
+    logits: torch.Tensor, prefab_object_ids: torch.LongTensor,
+    other_ambig_object_unique_ids: torch.LongTensor) -> torch.Tensor:
+    
     # print("logits")
     # print(logits.shape, logits)
 
@@ -18,22 +21,35 @@ def contrastive_loss(logits: torch.Tensor, prefab_object_ids: torch.LongTensor) 
     # 1 if it's the image of the same prefab object
     for i in range(labels.shape[0]):
         current_prefab_obj_id = prefab_object_ids[i]
+        current_other_ambig_prefab_obj_ids = torch.tensor(other_ambig_object_unique_ids[i])
         # find indices of same elements in the tensor
         indices_of_same_prefab_objs = (
             prefab_object_ids == current_prefab_obj_id).nonzero(as_tuple=False)
-        for j in indices_of_same_prefab_objs:
-            labels[i, j.item()] = 1.
-            labels[j.item(), i] = 1.
+        indices_of_same_prefab_objs = indices_of_same_prefab_objs.view(-1).tolist()
+        # print("same", indices_of_same_prefab_objs)
+        indices_of_other_ambig_objs_in_dialogue = []
+        for index, pid in enumerate(prefab_object_ids):
+            for other_id in current_other_ambig_prefab_obj_ids:
+                if pid == other_id:
+                    indices_of_other_ambig_objs_in_dialogue.append(index)
+        # print("other", indices_of_other_ambig_objs_in_dialogue)
+        indices_of_ambiguous_objs = list(set(indices_of_same_prefab_objs + indices_of_other_ambig_objs_in_dialogue))
+        for j in indices_of_ambiguous_objs:
+            labels[i, j] = 1.
+            labels[j, i] = 1.
     total_examples = torch.numel(labels)
     num_positive_examples = torch.count_nonzero(labels)
     pos_weight = (total_examples - num_positive_examples) / num_positive_examples
     return nn.functional.binary_cross_entropy_with_logits(logits, target=labels, pos_weight=pos_weight)
 
-def clip_loss(similarity: torch.Tensor, prefab_object_ids: torch.LongTensor) -> torch.Tensor:
-    caption_loss = contrastive_loss(similarity, prefab_object_ids)
+def clip_loss(
+    similarity: torch.Tensor, prefab_object_ids: torch.LongTensor,
+    other_ambig_object_unique_ids: torch.LongTensor) -> torch.Tensor:
+
+    caption_loss = contrastive_loss(similarity, prefab_object_ids, other_ambig_object_unique_ids)
     # print("similarity")
     # print(similarity.shape, similarity)
-    image_loss = contrastive_loss(similarity.t(), prefab_object_ids)
+    image_loss = contrastive_loss(similarity.t(), prefab_object_ids, other_ambig_object_unique_ids)
     return (caption_loss + image_loss) / 2.0
 
 class CLIPPERModel(CLIPModel):
@@ -46,6 +62,7 @@ class CLIPPERModel(CLIPModel):
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         object_ids: Optional[torch.LongTensor] = None,
+        other_ambig_object_unique_ids: Optional[torch.LongTensor] = None,
         prefab_object_ids: Optional[torch.LongTensor] = None,
         return_loss: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
@@ -127,7 +144,7 @@ class CLIPPERModel(CLIPModel):
 
         loss = None
         if return_loss:
-            loss = clip_loss(logits_per_text, prefab_object_ids)
+            loss = clip_loss(logits_per_text, prefab_object_ids, other_ambig_object_unique_ids)
 
         if not return_dict:
             output = (logits_per_image, logits_per_text, text_embeds, image_embeds, text_outputs, vision_outputs)
