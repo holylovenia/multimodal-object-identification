@@ -179,7 +179,8 @@ def convert_attrs_to_caption(example_batch):
 
 
 def tokenize_captions(example_batch, tokenizer, max_seq_length):
-    text_inputs = tokenizer(example_batch["caption"], max_length=max_seq_length, padding="max_length", truncation=True)
+    text_inputs = tokenizer(
+        example_batch["caption"], max_length=max_seq_length, padding="max_length", truncation=True)
     example_batch["input_ids"] = text_inputs.input_ids
     example_batch["attention_mask"] = text_inputs.attention_mask
     return example_batch
@@ -200,7 +201,7 @@ def load_image_conv_dataset(
     
     dset = {
         'dialog_id': [], 'turn_id': [], 'object_id': [],
-        'prefab_object_id': [],
+        'prefab_object_id': [], 'other_ambig_object_unique_ids': [],
         'dialogue': [], 'image': [], 'bbox': []
     }
     for row in data:
@@ -221,7 +222,15 @@ def load_image_conv_dataset(
         for scene_objects in scene['scenes']:
             for obj in scene_objects['objects']:
                 if obj["index"] in labels: # ambigous conv-image pair
-                    scene_dict[obj['index']] = (obj['bbox'], obj['unique_id'])
+                    other_ambig_object_ids = labels
+                    other_ambig_object_ids.remove(obj['index'])
+
+                    other_ambig_object_unique_ids = []
+                    for id in other_ambig_object_ids:
+                        for scene_obj in scene_objects["objects"]: # iterate over all objects in the scene
+                            if scene_obj["index"] == id: # if they have the same index
+                                other_ambig_object_unique_ids.append(scene_obj["unique_id"])
+                    scene_dict[obj['index']] = (obj['bbox'], obj['unique_id'], other_ambig_object_unique_ids)
 
         image_path = data[0]['image_name']
         for img_dir_path in img_dir_paths:
@@ -230,11 +239,12 @@ def load_image_conv_dataset(
                 break
 
         dialogue = data[0]["input_text"]
-        for obj_id, (bbox, prefab_obj_id) in scene_dict.items():
+        for obj_id, (bbox, prefab_obj_id, other_ambig_object_unique_ids) in scene_dict.items():
             dset['dialog_id'].append(dialog_id)
             dset['turn_id'].append(turn_id)
             dset['object_id'].append(obj_id)
             dset['prefab_object_id'].append(prefab_obj_id)
+            dset['other_ambig_object_unique_ids'].append(other_ambig_object_unique_ids)
             dset['dialogue'].append(dialogue)
             dset['image'].append(image_path)
             dset['bbox'].append(bbox)

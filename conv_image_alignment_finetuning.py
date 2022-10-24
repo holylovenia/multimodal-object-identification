@@ -170,6 +170,7 @@ def run(model_args, data_args, training_args):
         attention_mask = torch.tensor([example["attention_mask"] for example in examples], dtype=torch.long)
         object_ids = torch.tensor([example["object_id"] for example in examples])
         prefab_object_ids = torch.tensor([example["prefab_object_id"] for example in examples])
+        other_ambig_object_unique_ids = [example["other_ambig_object_unique_ids"] for example in examples]
         return {
             "pixel_values": pixel_values,
             "input_ids": input_ids,
@@ -177,6 +178,7 @@ def run(model_args, data_args, training_args):
             "return_loss": True,
             "object_ids": object_ids,
             "prefab_object_ids": prefab_object_ids,
+            "other_ambig_object_unique_ids": other_ambig_object_unique_ids,
     }
 
     # config = transformers.AutoConfig.from_pretrained(model_args.model_name_or_path)

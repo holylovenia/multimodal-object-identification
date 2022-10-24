@@ -1,6 +1,6 @@
 CUDA_VISIBLE_DEVICES=0 python conv_image_alignment_finetuning.py \
-    --output_dir="./save/conv-im-align/clipper" \
-    --cache_dir="./cache/conv-im-align/clipper" \
+    --output_dir="./save/conv-im-align/clipper_neighbors" \
+    --cache_dir="./cache/conv-im-align/clipper_neighbors" \
     --model_name_or_path="openai/clip-vit-base-patch32" \
     --vision_model_name_or_path="openai/clip-vit-base-patch32" \
     --text_model_name_or_path="roberta-base" \
