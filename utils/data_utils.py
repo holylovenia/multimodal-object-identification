@@ -285,6 +285,7 @@ def load_image_text_eval_dataset(
         dialog_id = row['dialog_id']
         turn_id = row['turn_id']
         labels = row['ambiguous_candidates']
+        object_map = row['object_map']
 
         # Scene
         scene_path = row['image_name'].replace('.png','_scene.json')
@@ -296,8 +297,12 @@ def load_image_text_eval_dataset(
         scene = json.load(open(scene_path, 'r'))
         scene_dict = {}
         for scene_objects in scene['scenes']:
+            index_mapping = {}
+            for obj_id, obj in zip(object_map, scene_objects['objects']):
+                index_mapping[obj['index']] = obj_id
+            
             for obj in scene_objects['objects']:
-                scene_dict[obj['index']] = obj['bbox']
+                scene_dict[index_mapping[obj['index']]] = obj['bbox']
 
         image_path = data[0]['image_name']
         for img_dir_path in img_dir_paths:
