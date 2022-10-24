@@ -2,6 +2,7 @@ from PIL import ImageFile
 from copy import deepcopy
 from datasets import load_from_disk, set_caching_enabled
 from detr import CocoEvaluator
+from model import model_utils
 from model.clipper import CLIPPERModel
 from utils import data_utils, utils
 from utils.args_helper import (
@@ -178,9 +179,13 @@ def run(model_args, data_args, training_args):
             "prefab_object_ids": prefab_object_ids,
     }
 
-    model = CLIPPERModel.from_pretrained(
-        model_args.model_name_or_path
-    )
+    # config = transformers.AutoConfig.from_pretrained(model_args.model_name_or_path)
+    # if data_args.max_seq_length > 77: # CLIP's default absolute max position embeddings
+    #     config.update({"max_position_embeddings": data_args.max_seq_length})
+    model = CLIPPERModel.from_pretrained(model_args.model_name_or_path)
+    # if data_args.max_seq_length > 77: # CLIP's default absolute max position embeddings
+    #     model = model_utils._resize_position_embeddings(model, data_args.max_seq_length)
+    # print(model.vision_model.embeddings.position_embedding, model.text_model.embeddings.position_embedding)
     
     trainer = transformers.Trainer(
         model=model,

@@ -14,9 +14,7 @@ def contrastive_loss(logits: torch.Tensor, prefab_object_ids: torch.LongTensor) 
     # print("logits")
     # print(logits.shape, logits)
 
-    labels = torch.zeros(logits.shape).to(logits.device)
-    labels = labels.fill_diagonal_(1)
-
+    labels = torch.eye(logits.shape[0]).to(logits.device)
     # 1 if it's the image of the same prefab object
     for i in range(labels.shape[0]):
         current_prefab_obj_id = prefab_object_ids[i]
@@ -26,8 +24,10 @@ def contrastive_loss(logits: torch.Tensor, prefab_object_ids: torch.LongTensor) 
         for j in indices_of_same_prefab_objs:
             labels[i, j.item()] = 1.
             labels[j.item(), i] = 1.
-                    
-    return nn.functional.binary_cross_entropy_with_logits(logits, target=labels)
+    total_examples = torch.numel(labels)
+    num_positive_examples = torch.count_nonzero(labels)
+    pos_weight = (total_examples - num_positive_examples) / num_positive_examples
+    return nn.functional.binary_cross_entropy_with_logits(logits, target=labels, pos_weight=pos_weight)
 
 def clip_loss(similarity: torch.Tensor, prefab_object_ids: torch.LongTensor) -> torch.Tensor:
     caption_loss = contrastive_loss(similarity, prefab_object_ids)
