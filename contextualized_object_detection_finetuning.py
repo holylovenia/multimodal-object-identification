@@ -10,9 +10,10 @@ from utils.args_helper import (
 )
 from tqdm import tqdm
 from trainer.detr_trainer import DetrTrainer
-from transformers import HfArgumentParser
+from transformers import HfArgumentParser, DataCollatorWithPadding
 from transformers.trainer_utils import get_last_checkpoint, is_main_process
 from typing import Dict, Union, Any, Optional, List, Tuple
+from model.holy_detr import HolyDetrForObjectDetection
 
 import datasets
 import json
@@ -41,20 +42,47 @@ def run(model_args, data_args, training_args):
     # Data loading
     MAPPING = data_utils.load_categories()
     dataset, MAPPING = data_utils.load_objects_in_scenes_dataset(mapping=MAPPING)
+
+    # Preprocessing
+    tokenizer = transformers.AutoTokenizer.from_pretrained(model_args.text_model_name_or_path)
+    feature_extractor = transformers.AutoFeatureExtractor.from_pretrained(model_args.model_name_or_path)
+
     dataset = dataset.map(
         data_utils.compute_image_area,
         num_proc=data_args.preprocessing_num_workers,
         desc="compute image area",
         load_from_cache_file=True,
-        cache_file_name=os.path.join(cache_dir_path, "ds_area.arrow")
+        cache_file_name=os.path.join(cache_dir_path, "ds_area.arrow"),
+        remove_columns=None
+    )
+    dataset = dataset.map(
+        data_utils.add_empty_dialogue,
+        num_proc=data_args.preprocessing_num_workers,
+        desc="adding empty dialogue",
+        load_from_cache_file=False,
+        cache_file_name=os.path.join(cache_dir_path, "ds_dialogue.arrow"),
+        remove_columns=None
+    )
+    dataset = dataset.map(
+        data_utils.convert_dialogue_to_caption,
+        num_proc=data_args.preprocessing_num_workers,
+        desc="convert object attributes to caption",
+        load_from_cache_file=False,
+        cache_file_name=os.path.join(cache_dir_path, "ds_convert.arrow"),
+        fn_kwargs={"num_utterances": data_args.num_utterances},
+        remove_columns=["dialogue"]
+    )
+    dataset = dataset.map(
+        data_utils.tokenize_text,
+        num_proc=data_args.preprocessing_num_workers,
+        desc="tokenize text data",
+        load_from_cache_file=False,
+        cache_file_name=os.path.join(cache_dir_path, "ds_token.arrow"),
+        fn_kwargs={"tokenizer": tokenizer, "text_column_name": "caption"},
+        remove_columns=["caption"]
     )
     raw_datasets = dataset.train_test_split(0.1)
     raw_datasets["all"] = dataset
-    print(raw_datasets['all'])[:3]
-    exit()
-
-    # Preprocessing
-    feature_extractor = transformers.AutoFeatureExtractor.from_pretrained(model_args.model_name_or_path)
 
     def transform(example_batch):
         images = [image.convert("RGB") for image in example_batch["image"]]
@@ -62,33 +90,51 @@ def run(model_args, data_args, training_args):
             {"image_id": id_, "annotations": object_} \
             for (id_, object_) in zip(example_batch["image_id"], example_batch["objects"])
         ]
-        return feature_extractor(images=images, annotations=targets, return_tensors="pt")
+        features = feature_extractor(images=images, annotations=targets, return_tensors="pt")
+        for key, value in features.items():
+            example_batch[key] = value
+        return example_batch
     proc_datasets = deepcopy(raw_datasets)
     proc_datasets["train"] = proc_datasets["train"].with_transform(transform)
     proc_datasets["test"] = proc_datasets["test"].with_transform(transform)
     proc_datasets["all"] = proc_datasets["all"].with_transform(transform)
 
     # Training and evaluation
+    text_collator = DataCollatorWithPadding(tokenizer)
     def collate_fn(batch):
         pixel_values = [item["pixel_values"] for item in batch]
         encoding = feature_extractor.pad_and_create_pixel_mask(
             pixel_values, return_tensors="pt"
         )
         labels = [item["labels"] for item in batch]
+        text_batch = text_collator({'input_ids': [item["input_ids"] for item in batch]})
+        
         batch = {}
         batch["pixel_values"] = encoding["pixel_values"]
         batch["pixel_mask"] = encoding["pixel_mask"]
         batch["labels"] = labels
+        batch["input_ids"] = text_batch["input_ids"]
+        batch["attention_mask"] = text_batch["attention_mask"]
         return batch
 
-    model = transformers.AutoModelForObjectDetection.from_pretrained(
+    text_model = transformers.AutoModel.from_pretrained(model_args.text_model_name_or_path)
+    config = transformers.AutoConfig.from_pretrained(
         model_args.model_name_or_path,
         id2label=MAPPING["id2cat"],
         label2id=MAPPING["cat2id"],
-        ignore_mismatched_sizes=True)
+    )
+    detr_model = transformers.AutoModelForObjectDetection.from_pretrained(
+        model_args.model_name_or_path,
+        id2label=MAPPING["id2cat"],
+        label2id=MAPPING["cat2id"],
+        ignore_mismatched_sizes=True
+    )
+    config.text_auxiliary_loss = False
+    holy_detr = HolyDetrForObjectDetection(config, text_model)
+    holy_detr.load_state_dict(detr_model.state_dict(), strict=False)
     
     trainer = DetrTrainer(
-        model=model,
+        model=holy_detr,
         args=training_args,
         data_collator=collate_fn,
         train_dataset=proc_datasets["train"],
