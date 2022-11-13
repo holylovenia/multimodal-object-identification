@@ -26,7 +26,6 @@ class HolyDetrLoss(nn.Module):
             raise KeyError("No logits were found in the outputs")
         src_logits_list = outputs["logits"]
 
-        # TODO: Permutation Index
         idx = self._get_src_permutation_idx(indices)
         target_classes_o = torch.cat([t["class_labels"][J] for t, (_, J) in zip(targets, indices)])
         target_classes = torch.full(
@@ -216,6 +215,7 @@ class HolyDetrModel(DetrModel):
         pixel_values,
         input_ids=None,
         pixel_mask=None,
+        attentions_mask=None,
         decoder_attention_mask=None,
         encoder_outputs=None,
         inputs_embeds=None,
@@ -282,15 +282,17 @@ class HolyDetrModel(DetrModel):
         queries = torch.zeros_like(query_position_embeddings)
         
         # Textual Embedding
-        sent_rep = self.text_model(input_ids, output_hidden_states=True).last_hidden_state[:,0,:]
+        sent_rep = self.text_model(input_ids, attentions_mask=attentions_mask,
+                                output_hidden_states=True).last_hidden_state[:,0,:]
         detr_text_rep = self.text_aligner(sent_rep)
         queries += detr_text_rep # Inject text representation to queries
         
-        text_logits_list = []
-        if self.config.use_auxiliary_loss:
-            for text_classifier in self.text_classifiers:
-                text_logits_list.append(text_classifier(sent_rep))
-        # TODO: Add to return value
+        # TODO: Calculate the text auxiliary loss & add to return value
+        # text_logits_list = []
+        # if self.config.use_auxiliary_loss:
+        #     for text_classifier in self.text_classifiers:
+        #         text_logits_list.append(text_classifier(sent_rep))
+        #         text_logits_list.append(text_classifier(sent_rep))
         
         # decoder outputs consists of (dec_features, dec_hidden, dec_attn)
         decoder_outputs = self.decoder(
@@ -340,7 +342,9 @@ class HolyDetrForObjectDetection(DetrForObjectDetection):
     def forward(
         self,
         pixel_values,
+        input_ids=None,
         pixel_mask=None,
+        attention_mask=None,
         decoder_attention_mask=None,
         encoder_outputs=None,
         inputs_embeds=None,

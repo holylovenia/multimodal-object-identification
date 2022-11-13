@@ -50,10 +50,11 @@ def run(model_args, data_args, training_args):
     )
     raw_datasets = dataset.train_test_split(0.1)
     raw_datasets["all"] = dataset
+    print(raw_datasets['all'])[:3]
+    exit()
 
     # Preprocessing
-    feature_extractor = transformers.AutoFeatureExtractor.from_pretrained(
-        model_args.model_name_or_path)
+    feature_extractor = transformers.AutoFeatureExtractor.from_pretrained(model_args.model_name_or_path)
 
     def transform(example_batch):
         images = [image.convert("RGB") for image in example_batch["image"]]
