@@ -134,3 +134,4 @@ dmypy.json
 **/save
 **/cache
 **/log
+**/eval/*
