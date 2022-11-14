@@ -23,6 +23,15 @@ class DataArguments:
     """
     Arguments pertaining to the data loading and preprocessing pipeline.
     """
+    train_dataset_path: str = field(
+        metadata={"help": "Train dataset path"}
+    )
+    dev_dataset_path: str = field(
+        metadata={"help": "Dev dataset path"}
+    )
+    devtest_dataset_path: str = field(
+        metadata={"help": "Devtest dataset path"}
+    )
     preprocessing_num_workers: Optional[int] = field(
         default=16,
         metadata={"help": "The number of processes to use for the preprocessing."},
