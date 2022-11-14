@@ -332,6 +332,9 @@ def load_image_text_eval_dataset(
 def convert_dialogue_to_caption(example_batch, num_utterances=3, utterance_turn='both'):
     utterances = []
     for turn_id, turn in enumerate(example_batch['dialogue']):
+        if len(turn) == 0:
+            continue # Skip empty string
+
         if turn_id % 2 == 0:
             if utterance_turn == 'both' or utterance_turn =='user':
                 utterances.append("<USER> " + turn)
@@ -339,4 +342,13 @@ def convert_dialogue_to_caption(example_batch, num_utterances=3, utterance_turn=
             if utterance_turn == 'both' or utterance_turn =='system':
                 utterances.append("<SYS> " + turn)
     example_batch['caption'] = (" ".join(utterances[-num_utterances:])).lower()
+    return example_batch
+
+def add_empty_dialogue(example_batch):
+    if 'dialogue' not in example_batch:
+        example_batch['dialogue'] = ['' for i in range(10)]
+    return example_batch
+
+def tokenize_text(example_batch, tokenizer, text_column_name='caption'):
+    example_batch['input_ids'] = tokenizer(example_batch[text_column_name])['input_ids']
     return example_batch

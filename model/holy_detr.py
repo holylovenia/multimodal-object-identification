@@ -6,119 +6,129 @@ from typing import Dict, List, Optional, Tuple
 import torch
 from torch import Tensor, nn
 
-from transformers.modeling_outputs import BaseModelOutput, BaseModelOutputWithCrossAttentions, Seq2SeqModelOutput
-from transformers import PreTrainedModel, DetrConfig, DetrModel, DetrForObjectDetection
+from transformers import PreTrainedModel, DetrConfig, DetrModel, DetrForObjectDetection, DetrFeatureExtractor
+from transformers.models.detr.modeling_detr import DetrDecoderLayer, DetrMLPPredictionHead, DetrModelOutput, DetrHungarianMatcher, DetrLoss, DetrObjectDetectionOutput
 
-class HolyDetrLoss(nn.Module):
-    def __init__(self, matcher, num_classes, eos_coef, losses):
-        super().__init__()
-        self.matcher = matcher
-        self.num_classes = num_classes
-        self.eos_coef = eos_coef
-        self.losses = losses
-        empty_weight = torch.ones(self.num_classes + 1)
-        empty_weight[-1] = self.eos_coef
-        self.register_buffer("empty_weight", empty_weight)
+# class HolyDetrFeatureExtractor(DetrFeatureExtractor):
+#     def __call__(
+#         self, images, annotations=None, return_segmentation_masks=False, masks_path=None,
+#         pad_and_return_pixel_mask=True, return_tensors=None, **kwargs
+#     ):
+#         batch = super().__call__(
+#             images, annotations, return_segmentation_masks, masks_path,
+#             pad_and_return_pixel_mask, return_tensors, **kwargs
+#         )
+#         return batch
 
-    # removed logging parameter, which was part of the original implementation
-    def loss_labels(self, outputs, targets, indices, num_boxes):
-        if "logits" not in outputs:
-            raise KeyError("No logits were found in the outputs")
-        src_logits_list = outputs["logits"]
+# class HolyDetrLoss(nn.Module):
+#     def __init__(self, matcher, num_classes, eos_coef, losses):
+#         super().__init__()
+#         self.matcher = matcher
+#         self.num_classes = num_classes
+#         self.eos_coef = eos_coef
+#         self.losses = losses
+#         empty_weight = torch.ones(self.num_classes + 1)
+#         empty_weight[-1] = self.eos_coef
+#         self.register_buffer("empty_weight", empty_weight)
 
-        # TODO: Permutation Index
-        idx = self._get_src_permutation_idx(indices)
-        target_classes_o = torch.cat([t["class_labels"][J] for t, (_, J) in zip(targets, indices)])
-        target_classes = torch.full(
-            src_logits.shape[:2], self.num_classes, dtype=torch.int64, device=src_logits.device
-        )
-        target_classes[idx] = target_classes_o
+#     # removed logging parameter, which was part of the original implementation
+#     def loss_labels(self, outputs, targets, indices, num_boxes):
+#         if "logits" not in outputs:
+#             raise KeyError("No logits were found in the outputs")
+#         src_logits_list = outputs["logits"]
 
-        loss_ce = nn.functional.cross_entropy(src_logits.transpose(1, 2), target_classes, self.empty_weight)
-        losses = {"loss_ce": loss_ce}
+#         idx = self._get_src_permutation_idx(indices)
+#         target_classes_o = torch.cat([t["class_labels"][J] for t, (_, J) in zip(targets, indices)])
+#         target_classes = torch.full(
+#             src_logits.shape[:2], self.num_classes, dtype=torch.int64, device=src_logits.device
+#         )
+#         target_classes[idx] = target_classes_o
 
-        return losses
+#         loss_ce = nn.functional.cross_entropy(src_logits.transpose(1, 2), target_classes, self.empty_weight)
+#         losses = {"loss_ce": loss_ce}
 
-    @torch.no_grad()
-    def loss_cardinality(self, outputs, targets, indices, num_boxes):
-        """
-        Compute the cardinality error, i.e. the absolute error in the number of predicted non-empty boxes.
-        This is not really a loss, it is intended for logging purposes only. It doesn't propagate gradients.
-        """
-        logits = outputs["logits"][0]
-        device = logits.device
-        target_lengths = torch.as_tensor([len(v["class_labels"]) for v in targets], device=device)
-        # Count the number of predictions that are NOT "no-object" (which is the last class)
-        card_pred = (logits.argmax(-1) != logits.shape[-1] - 1).sum(1)
-        card_err = nn.functional.l1_loss(card_pred.float(), target_lengths.float())
-        losses = {"cardinality_error": card_err}
-        return losses
+#         return losses
 
-    def _get_src_permutation_idx(self, indices):
-        # permute predictions following indices
-        batch_idx = torch.cat([torch.full_like(src, i) for i, (src, _) in enumerate(indices)])
-        src_idx = torch.cat([src for (src, _) in indices])
-        return batch_idx, src_idx
+#     @torch.no_grad()
+#     def loss_cardinality(self, outputs, targets, indices, num_boxes):
+#         """
+#         Compute the cardinality error, i.e. the absolute error in the number of predicted non-empty boxes.
+#         This is not really a loss, it is intended for logging purposes only. It doesn't propagate gradients.
+#         """
+#         logits = outputs["logits"][0]
+#         device = logits.device
+#         target_lengths = torch.as_tensor([len(v["class_labels"]) for v in targets], device=device)
+#         # Count the number of predictions that are NOT "no-object" (which is the last class)
+#         card_pred = (logits.argmax(-1) != logits.shape[-1] - 1).sum(1)
+#         card_err = nn.functional.l1_loss(card_pred.float(), target_lengths.float())
+#         losses = {"cardinality_error": card_err}
+#         return losses
 
-    def _get_tgt_permutation_idx(self, indices):
-        # permute targets following indices
-        batch_idx = torch.cat([torch.full_like(tgt, i) for i, (_, tgt) in enumerate(indices)])
-        tgt_idx = torch.cat([tgt for (_, tgt) in indices])
-        return batch_idx, tgt_idx
+#     def _get_src_permutation_idx(self, indices):
+#         # permute predictions following indices
+#         batch_idx = torch.cat([torch.full_like(src, i) for i, (src, _) in enumerate(indices)])
+#         src_idx = torch.cat([src for (src, _) in indices])
+#         return batch_idx, src_idx
 
-    def get_loss(self, loss, outputs, targets, indices, num_boxes):
-        loss_map = {
-            "labels": self.loss_labels,
-            "cardinality": self.loss_cardinality,
-            "boxes": self.loss_boxes,
-            "masks": self.loss_masks,
-        }
-        if loss not in loss_map:
-            raise ValueError(f"Loss {loss} not supported")
-        return loss_map[loss](outputs, targets, indices, num_boxes)
+#     def _get_tgt_permutation_idx(self, indices):
+#         # permute targets following indices
+#         batch_idx = torch.cat([torch.full_like(tgt, i) for i, (_, tgt) in enumerate(indices)])
+#         tgt_idx = torch.cat([tgt for (_, tgt) in indices])
+#         return batch_idx, tgt_idx
 
-    def forward(self, outputs, targets):
-        """
-        This performs the loss computation.
-        Args:
-             outputs (`dict`, *optional*):
-                Dictionary of tensors, see the output specification of the model for the format.
-             targets (`List[dict]`, *optional*):
-                List of dicts, such that len(targets) == batch_size. The expected keys in each dict depends on the
-                losses applied, see each loss' doc.
-        """
-        outputs_without_aux = {k: v for k, v in outputs.items() if k != "auxiliary_outputs"}
+#     def get_loss(self, loss, outputs, targets, indices, num_boxes):
+#         loss_map = {
+#             "labels": self.loss_labels,
+#             "cardinality": self.loss_cardinality,
+#             "boxes": self.loss_boxes,
+#             "masks": self.loss_masks,
+#         }
+#         if loss not in loss_map:
+#             raise ValueError(f"Loss {loss} not supported")
+#         return loss_map[loss](outputs, targets, indices, num_boxes)
 
-        # Retrieve the matching between the outputs of the last layer and the targets
-        indices = self.matcher(outputs_without_aux, targets)
+#     def forward(self, outputs, targets):
+#         """
+#         This performs the loss computation.
+#         Args:
+#              outputs (`dict`, *optional*):
+#                 Dictionary of tensors, see the output specification of the model for the format.
+#              targets (`List[dict]`, *optional*):
+#                 List of dicts, such that len(targets) == batch_size. The expected keys in each dict depends on the
+#                 losses applied, see each loss' doc.
+#         """
+#         outputs_without_aux = {k: v for k, v in outputs.items() if k != "auxiliary_outputs"}
 
-        # Compute the average number of target boxes across all nodes, for normalization purposes
-        num_boxes = sum(len(t["class_labels"]) for t in targets)
-        num_boxes = torch.as_tensor([num_boxes], dtype=torch.float, device=next(iter(outputs.values())).device)
-        # (Niels): comment out function below, distributed training to be added
-        # if is_dist_avail_and_initialized():
-        #     torch.distributed.all_reduce(num_boxes)
-        # (Niels) in original implementation, num_boxes is divided by get_world_size()
-        num_boxes = torch.clamp(num_boxes, min=1).item()
+#         # Retrieve the matching between the outputs of the last layer and the targets
+#         indices = self.matcher(outputs_without_aux, targets)
 
-        # Compute all the requested losses
-        losses = {}
-        for loss in self.losses:
-            losses.update(self.get_loss(loss, outputs, targets, indices, num_boxes))
+#         # Compute the average number of target boxes across all nodes, for normalization purposes
+#         num_boxes = sum(len(t["class_labels"]) for t in targets)
+#         num_boxes = torch.as_tensor([num_boxes], dtype=torch.float, device=next(iter(outputs.values())).device)
+#         # (Niels): comment out function below, distributed training to be added
+#         # if is_dist_avail_and_initialized():
+#         #     torch.distributed.all_reduce(num_boxes)
+#         # (Niels) in original implementation, num_boxes is divided by get_world_size()
+#         num_boxes = torch.clamp(num_boxes, min=1).item()
 
-        # In case of auxiliary losses, we repeat this process with the output of each intermediate layer.
-        if "auxiliary_outputs" in outputs:
-            for i, auxiliary_outputs in enumerate(outputs["auxiliary_outputs"]):
-                indices = self.matcher(auxiliary_outputs, targets)
-                for loss in self.losses:
-                    if loss == "masks":
-                        # Intermediate masks losses are too costly to compute, we ignore them.
-                        continue
-                    l_dict = self.get_loss(loss, auxiliary_outputs, targets, indices, num_boxes)
-                    l_dict = {k + f"_{i}": v for k, v in l_dict.items()}
-                    losses.update(l_dict)
+#         # Compute all the requested losses
+#         losses = {}
+#         for loss in self.losses:
+#             losses.update(self.get_loss(loss, outputs, targets, indices, num_boxes))
 
-        return losses
+#         # In case of auxiliary losses, we repeat this process with the output of each intermediate layer.
+#         if "auxiliary_outputs" in outputs:
+#             for i, auxiliary_outputs in enumerate(outputs["auxiliary_outputs"]):
+#                 indices = self.matcher(auxiliary_outputs, targets)
+#                 for loss in self.losses:
+#                     if loss == "masks":
+#                         # Intermediate masks losses are too costly to compute, we ignore them.
+#                         continue
+#                     l_dict = self.get_loss(loss, auxiliary_outputs, targets, indices, num_boxes)
+#                     l_dict = {k + f"_{i}": v for k, v in l_dict.items()}
+#                     losses.update(l_dict)
+
+#         return losses
     
 class HolyDetrDecoderLayer(DetrDecoderLayer):
     def forward(
@@ -206,7 +216,7 @@ class HolyDetrModel(DetrModel):
         
         self.text_model = text_model
         self.text_aligner = nn.Linear(self.text_model.config.hidden_size,  self.config.d_model)
-        if config.use_auxiliary_loss:
+        if config.text_auxiliary_loss:
             self.text_classifiers = nn.ModuleList([
                 nn.Linear(self.text_model.config.hidden_size, n_class + 1) for n_class in config.num_labels
             ])
@@ -216,6 +226,7 @@ class HolyDetrModel(DetrModel):
         pixel_values,
         input_ids=None,
         pixel_mask=None,
+        attention_mask=None,
         decoder_attention_mask=None,
         encoder_outputs=None,
         inputs_embeds=None,
@@ -282,15 +293,17 @@ class HolyDetrModel(DetrModel):
         queries = torch.zeros_like(query_position_embeddings)
         
         # Textual Embedding
-        sent_rep = self.text_model(input_ids, output_hidden_states=True).last_hidden_state[:,0,:]
+        sent_rep = self.text_model(input_ids=input_ids, attention_mask=attention_mask,
+                                output_hidden_states=True).last_hidden_state[:,0,:]
         detr_text_rep = self.text_aligner(sent_rep)
-        queries += detr_text_rep # Inject text representation to queries
+        queries += detr_text_rep.unsqueeze(1) # Inject text representation to queries
         
-        text_logits_list = []
-        if self.config.use_auxiliary_loss:
-            for text_classifier in self.text_classifiers:
-                text_logits_list.append(text_classifier(sent_rep))
-        # TODO: Add to return value
+        # TODO: Calculate the text auxiliary loss & add to return value
+        # text_logits_list = []
+        # if self.config.text_auxiliary_loss:
+        #     for text_classifier in self.text_classifiers:
+        #         text_logits_list.append(text_classifier(sent_rep))
+        #         text_logits_list.append(text_classifier(sent_rep))
         
         # decoder outputs consists of (dec_features, dec_hidden, dec_attn)
         decoder_outputs = self.decoder(
@@ -320,16 +333,16 @@ class HolyDetrModel(DetrModel):
         )
 
 class HolyDetrForObjectDetection(DetrForObjectDetection):
-    def __init__(self, config: DetrConfig):
+    def __init__(self, config: DetrConfig, text_model):
         super().__init__(config)
 
         # Holy DETR encoder-decoder model
-        self.model = HolyDetrModel(config)
+        self.model = HolyDetrModel(config, text_model)
         
         # Object detection heads
-        self.class_labels_classifiers = nn.ModuleList([
-            nn.Linear(config.d_model, n_class + 1) for n_class in config.num_labels
-        ])  # We add one for the "no object" class
+        self.class_labels_classifier = nn.Linear(
+            config.d_model, config.num_labels + 1
+        )  # We add one for the "no object" class
         self.bbox_predictor = DetrMLPPredictionHead(
             input_dim=config.d_model, hidden_dim=config.d_model, output_dim=4, num_layers=3
         )
@@ -340,7 +353,9 @@ class HolyDetrForObjectDetection(DetrForObjectDetection):
     def forward(
         self,
         pixel_values,
+        input_ids=None,
         pixel_mask=None,
+        attention_mask=None,
         decoder_attention_mask=None,
         encoder_outputs=None,
         inputs_embeds=None,
@@ -355,7 +370,9 @@ class HolyDetrForObjectDetection(DetrForObjectDetection):
         # First, sent images through DETR base model to obtain encoder + decoder outputs
         outputs = self.model(
             pixel_values,
+            input_ids=input_ids,
             pixel_mask=pixel_mask,
+            attention_mask=attention_mask,
             decoder_attention_mask=decoder_attention_mask,
             encoder_outputs=encoder_outputs,
             inputs_embeds=inputs_embeds,
@@ -368,9 +385,7 @@ class HolyDetrForObjectDetection(DetrForObjectDetection):
         sequence_output = outputs[0]
 
         # class logits + predicted bounding boxes
-        logits_list = []
-        for class_labels_classifier in self.class_labels_classifiers:
-            logits_list.append(class_labels_classifier(sequence_output))
+        logits = self.class_labels_classifier(sequence_output)
         pred_boxes = self.bbox_predictor(sequence_output).sigmoid()
 
         loss, loss_dict, auxiliary_outputs = None, None, None
