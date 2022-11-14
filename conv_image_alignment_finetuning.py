@@ -24,7 +24,7 @@ from torchvision.transforms import (
     ToTensor,
 )
 from trainer.detr_trainer import DetrTrainer
-from transformers import HfArgumentParser
+from transformers import HfArgumentParser, CLIPModel
 from transformers.trainer_utils import get_last_checkpoint, is_main_process
 from typing import Dict, Union, Any, Optional, List, Tuple
 
@@ -67,13 +67,13 @@ def run(model_args, data_args, training_args):
     # Data loading
     raw_datasets = datasets.DatasetDict()
     raw_datasets["train"] = data_utils.load_image_conv_dataset(
-        data_path="./preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_train.json",
+        data_path=data_args.train_dataset_path,
         return_gt_labels=False)
     raw_datasets["dev"] = data_utils.load_image_conv_dataset(
-        data_path="./preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_dev.json",
+        data_path=data_args.dev_dataset_path,
         return_gt_labels=False)
     raw_datasets["devtest"] = data_utils.load_image_conv_dataset(
-        data_path="./preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_devtest.json",
+        data_path=data_args.devtest_dataset_path,
         return_gt_labels=False)
 
     raw_datasets = raw_datasets.map(
@@ -168,23 +168,36 @@ def run(model_args, data_args, training_args):
         pixel_values = torch.stack([example["pixel_values"] for example in examples])
         input_ids = torch.tensor([example["input_ids"] for example in examples], dtype=torch.long)
         attention_mask = torch.tensor([example["attention_mask"] for example in examples], dtype=torch.long)
-        object_ids = torch.tensor([example["object_id"] for example in examples])
-        prefab_object_ids = torch.tensor([example["prefab_object_id"] for example in examples])
-        other_ambig_object_unique_ids = [example["other_ambig_object_unique_ids"] for example in examples]
-        return {
-            "pixel_values": pixel_values,
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-            "return_loss": True,
-            "object_ids": object_ids,
-            "prefab_object_ids": prefab_object_ids,
-            "other_ambig_object_unique_ids": other_ambig_object_unique_ids,
-    }
+        
+        if model_args.include_other_similar_objects or model_args.include_other_referred_objects:
+            object_ids = torch.tensor([example["object_id"] for example in examples])
+            prefab_object_ids = torch.tensor([example["prefab_object_id"] for example in examples])
+            other_ambig_object_unique_ids = [example["other_ambig_object_unique_ids"] for example in examples]
+            return {
+                "pixel_values": pixel_values,
+                "input_ids": input_ids,
+                "attention_mask": attention_mask,
+                "return_loss": True,
+                "object_ids": object_ids,
+                "prefab_object_ids": prefab_object_ids,
+                "other_ambig_object_unique_ids": other_ambig_object_unique_ids,
+            }
+        else:
+            return {
+                "pixel_values": pixel_values,
+                "input_ids": input_ids,
+                "attention_mask": attention_mask,
+                "return_loss": True,
+            }
 
     # config = transformers.AutoConfig.from_pretrained(model_args.model_name_or_path)
     # if data_args.max_seq_length > 77: # CLIP's default absolute max position embeddings
     #     config.update({"max_position_embeddings": data_args.max_seq_length})
-    model = CLIPPERModel.from_pretrained(model_args.model_name_or_path)
+    if model_args.include_other_similar_objects is False and model_args.include_other_referred_objects is False:
+        model = CLIPModel.from_pretrained(model_args.model_name_or_path)
+    else:
+        model = CLIPPERModel.from_pretrained(model_args.model_name_or_path)
+        model.modify_learning_objective(model_args)
     # if data_args.max_seq_length > 77: # CLIP's default absolute max position embeddings
     #     model = model_utils._resize_position_embeddings(model, data_args.max_seq_length)
     # print(model.vision_model.embeddings.position_embedding, model.text_model.embeddings.position_embedding)

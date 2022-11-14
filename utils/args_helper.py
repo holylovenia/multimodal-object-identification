@@ -10,14 +10,11 @@ class ModelArguments:
     model_name_or_path: Optional[str] = field(
         default="gpt2", metadata={"help": "The path of the HuggingFace model."}
     )    
-    text_model_name_or_path: Optional[str] = field(
-        default="bert-base-uncased", metadata={"help": "The path of the HuggingFace model for Holy DETR."}
-    )    
-    vision_model_name_or_path: Optional[str] = field(
-        default="openai/clip-vit-base-patch32", metadata={"help": "The path of the HuggingFace model."}
+    include_other_similar_objects: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to include other similar objects or not"}
     )
-    text_model_name_or_path: Optional[str] = field(
-        default="roberta-base", metadata={"help": "The path of the HuggingFace model."}
+    include_other_referred_objects: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to include other referred objects or not"}
     )
     
 

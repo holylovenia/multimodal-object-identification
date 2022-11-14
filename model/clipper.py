@@ -12,7 +12,9 @@ import torch.nn as nn
 # https://sachinruk.github.io/blog/pytorch/pytorch%20lightning/loss%20function/gpu/2021/03/07/CLIP.html
 def contrastive_loss(
     logits: torch.Tensor, prefab_object_ids: torch.LongTensor,
-    other_ambig_object_unique_ids: torch.LongTensor) -> torch.Tensor:
+    other_ambig_object_unique_ids: torch.LongTensor,
+    include_other_similar_objects: bool,
+    include_other_referred_objects: bool) -> torch.Tensor:
     
     # print("logits")
     # print(logits.shape, logits)
@@ -21,19 +23,30 @@ def contrastive_loss(
     # 1 if it's the image of the same prefab object
     for i in range(labels.shape[0]):
         current_prefab_obj_id = prefab_object_ids[i]
-        current_other_ambig_prefab_obj_ids = torch.tensor(other_ambig_object_unique_ids[i])
-        # find indices of same elements in the tensor
-        indices_of_same_prefab_objs = (
-            prefab_object_ids == current_prefab_obj_id).nonzero(as_tuple=False)
-        indices_of_same_prefab_objs = indices_of_same_prefab_objs.view(-1).tolist()
-        # print("same", indices_of_same_prefab_objs)
-        indices_of_other_ambig_objs_in_dialogue = []
-        for index, pid in enumerate(prefab_object_ids):
-            for other_id in current_other_ambig_prefab_obj_ids:
-                if pid == other_id:
-                    indices_of_other_ambig_objs_in_dialogue.append(index)
-        # print("other", indices_of_other_ambig_objs_in_dialogue)
-        indices_of_ambiguous_objs = list(set(indices_of_same_prefab_objs + indices_of_other_ambig_objs_in_dialogue))
+
+        if include_other_similar_objects:
+            current_other_ambig_prefab_obj_ids = torch.tensor(other_ambig_object_unique_ids[i])
+            # find indices of same elements in the tensor
+            indices_of_same_prefab_objs = (
+                prefab_object_ids == current_prefab_obj_id).nonzero(as_tuple=False)
+            indices_of_same_prefab_objs = indices_of_same_prefab_objs.view(-1).tolist()
+            # print("same", indices_of_same_prefab_objs)
+        
+        if include_other_referred_objects:
+            indices_of_other_ambig_objs_in_dialogue = []
+            for index, pid in enumerate(prefab_object_ids):
+                for other_id in current_other_ambig_prefab_obj_ids:
+                    if pid == other_id:
+                        indices_of_other_ambig_objs_in_dialogue.append(index)
+            # print("other", indices_of_other_ambig_objs_in_dialogue)
+
+        if include_other_similar_objects and include_other_referred_objects:
+            indices_of_ambiguous_objs = list(set(indices_of_same_prefab_objs + indices_of_other_ambig_objs_in_dialogue))
+        elif include_other_similar_objects:
+            indices_of_ambiguous_objs = indices_of_same_prefab_objs
+        elif include_other_referred_objects:
+            indices_of_ambiguous_objs = indices_of_other_ambig_objs_in_dialogue
+        
         for j in indices_of_ambiguous_objs:
             labels[i, j] = 1.
             labels[j, i] = 1.
@@ -44,15 +57,24 @@ def contrastive_loss(
 
 def clip_loss(
     similarity: torch.Tensor, prefab_object_ids: torch.LongTensor,
-    other_ambig_object_unique_ids: torch.LongTensor) -> torch.Tensor:
+    other_ambig_object_unique_ids: torch.LongTensor,
+    include_other_similar_objects: bool,
+    include_other_referred_objects: bool) -> torch.Tensor:
 
-    caption_loss = contrastive_loss(similarity, prefab_object_ids, other_ambig_object_unique_ids)
-    # print("similarity")
-    # print(similarity.shape, similarity)
-    image_loss = contrastive_loss(similarity.t(), prefab_object_ids, other_ambig_object_unique_ids)
+    caption_loss = contrastive_loss(
+        similarity, prefab_object_ids, other_ambig_object_unique_ids,
+        include_other_similar_objects, include_other_referred_objects)
+    image_loss = contrastive_loss(
+        similarity.t(), prefab_object_ids, other_ambig_object_unique_ids,
+        include_other_similar_objects, include_other_similar_objects)
     return (caption_loss + image_loss) / 2.0
 
 class CLIPPERModel(CLIPModel):
+
+    def modify_learning_objective(self, model_args):
+        self.include_other_referred_objects = model_args.include_other_referred_objects
+        self.include_other_similar_objects = model_args.include_other_similar_objects
+
     # @add_start_docstrings_to_model_forward(CLIP_INPUTS_DOCSTRING)
     @replace_return_docstrings(output_type=CLIPOutput, config_class=CLIPConfig)
     def forward(
@@ -115,8 +137,6 @@ class CLIPPERModel(CLIPModel):
             return_dict=return_dict,
         )
 
-        # print("text_outputs", text_outputs, text_outputs[1])
-
         image_embeds = vision_outputs[1]
         image_embeds = self.visual_projection(image_embeds)
 
@@ -125,32 +145,22 @@ class CLIPPERModel(CLIPModel):
 
         # normalized features
         image_embeds = image_embeds / image_embeds.norm(p=2, dim=-1, keepdim=True)
-        # print("text_embeds", text_embeds)
-        # print("text_embeds.norm", text_embeds.norm(p=2, dim=-1, keepdim=True))
         text_embeds = text_embeds / text_embeds.norm(p=2, dim=-1, keepdim=True)
-
-        # print("image")
-        # print(image_embeds.shape, image_embeds)
-        # print()
-        # print("text")
-        # print(text_embeds.shape, text_embeds)
-        # print()
 
         # cosine similarity as logits
         logit_scale = self.logit_scale.exp()
-        # print("logit_scale", logit_scale.shape, logit_scale)
         logits_per_text = torch.matmul(text_embeds, image_embeds.t()) * logit_scale
         logits_per_image = logits_per_text.t()
 
         loss = None
         if return_loss:
-            loss = clip_loss(logits_per_text, prefab_object_ids, other_ambig_object_unique_ids)
+            loss = clip_loss(
+                logits_per_text, prefab_object_ids, other_ambig_object_unique_ids,
+                self.include_other_similar_objects, self.include_other_referred_objects)
 
         if not return_dict:
             output = (logits_per_image, logits_per_text, text_embeds, image_embeds, text_outputs, vision_outputs)
             return ((loss,) + output) if loss is not None else output
-
-        # quit()
 
         return CLIPOutput(
             loss=loss,
