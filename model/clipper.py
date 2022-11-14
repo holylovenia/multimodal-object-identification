@@ -25,7 +25,6 @@ def contrastive_loss(
         current_prefab_obj_id = prefab_object_ids[i]
 
         if include_other_similar_objects:
-            current_other_ambig_prefab_obj_ids = torch.tensor(other_ambig_object_unique_ids[i])
             # find indices of same elements in the tensor
             indices_of_same_prefab_objs = (
                 prefab_object_ids == current_prefab_obj_id).nonzero(as_tuple=False)
@@ -35,6 +34,7 @@ def contrastive_loss(
         if include_other_referred_objects:
             indices_of_other_ambig_objs_in_dialogue = []
             for index, pid in enumerate(prefab_object_ids):
+                current_other_ambig_prefab_obj_ids = torch.tensor(other_ambig_object_unique_ids[i])
                 for other_id in current_other_ambig_prefab_obj_ids:
                     if pid == other_id:
                         indices_of_other_ambig_objs_in_dialogue.append(index)
