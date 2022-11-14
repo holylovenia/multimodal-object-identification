@@ -345,18 +345,6 @@ def load_image_text_eval_dataset(
 def convert_dialogue_to_caption(example_batch, num_utterances=3, utterance_turn='both'):
     utterances = []
     for turn_id, turn in enumerate(example_batch['dialogue']):
-        if turn_id % 2 == 0:
-            if utterance_turn == 'both' or utterance_turn =='user':
-                utterances.append("<USER> " + turn)
-        else:
-            if utterance_turn == 'both' or utterance_turn =='system':
-                utterances.append("<SYS> " + turn)
-    example_batch['caption'] = (" ".join(utterances[-num_utterances:])).lower()
-    return example_batch
-
-def convert_dialogue_to_caption(example_batch, num_utterances=3, utterance_turn='both'):
-    utterances = []
-    for turn_id, turn in enumerate(example_batch['dialogue']):
         if len(turn) == 0:
             continue # Skip empty string
 
@@ -381,31 +369,36 @@ def tokenize_text(example_batch, tokenizer, text_column_name='caption'):
 ###
 #
 ###
-def load_image_text_eval_dataset(
+def load_sitcom_detr_dataset(
+    mapping,
     scene_dir_path = "./simmc2/data/public", 
     data_path = './preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_devtest.json',
     img_dir_paths = [
         './simmc2/data/simmc2_scene_images_dstc10_public_part1',
         './simmc2/data/simmc2_scene_images_dstc10_public_part2'
     ],
+    fashion_prefab_path="./simmc2/data/fashion_prefab_metadata_all.json",
+    furniture_prefab_path="./simmc2/data/furniture_prefab_metadata_all.json",    
     return_gt_labels=True,
 ):
     with open(data_path, "r") as file_id:
         raw_data = json.load(file_id)    
     data = raw_data["data"]
     gold_data = json.load(open(raw_data['source_path'],'r'))
-    
+
+    fashion_prefab = json.loads(open(fashion_prefab_path).read())
+    furniture_prefab = json.loads(open(furniture_prefab_path).read())
+
     dset = {
-        'dialog_id': [], 'scene_id': [], 'turn_id': [], 
-        'dialogue': [], 'image': [], 'objects': []
+        # 'dialog_id': [], 'scene_id': [], 'turn_id': [], 
+        'image': [], 'image_id': [], 'objects': [], 'dialogue': []
     }
-    for row in data:
+    for i, row in enumerate(data):
         # Dialogue idx to labels
         dialog_id = row['dialog_id']
         turn_id = row['turn_id']
         labels = row['ambiguous_candidates']
         object_map = row['object_map']
-
         # Scene
         scene_path = row['image_name'].replace('.png','_scene.json')
         scene_id = row['image_name'].split(".")[0]
@@ -420,32 +413,45 @@ def load_image_text_eval_dataset(
             index_mapping = {}
             for obj_id, obj in zip(object_map, scene_objects['objects']):
                 index_mapping[obj['index']] = obj_id
-            
-            for obj in scene_objects['objects']:
-                scene_dict[index_mapping[obj['index']]] = obj['bbox']
 
+            objects = []
+            for scene_object in scene_objects['objects']:
+                if index_mapping[scene_object['index']] not in labels:
+                    continue
+
+                object_annotation = {
+                    "bbox": [float(b) for b in scene_object["bbox"]],
+                    "id": scene_object["unique_id"],
+                    "area": None,
+                    "segmentation": [],
+                    "iscrowd": False,
+                }
+                if fashion_prefab.get(scene_object["prefab_path"]) is not None:
+                    item = fashion_prefab[scene_object["prefab_path"]]
+                else:
+                    item = furniture_prefab[scene_object["prefab_path"]]
+                object_annotation["category_id"] = mapping["cat2id"][item["type"]]
+                objects.append(object_annotation)
+
+        dialogue = row["input_text"]
         image_path = row['image_name']
         for img_dir_path in img_dir_paths:
             if os.path.exists(f'{img_dir_path}/{image_path}'):
                 image_path = f'{img_dir_path}/{image_path}'
                 break
 
-        dialogue = row["input_text"]
-        for obj_id, bbox in scene_dict.items():
-            dset['dialog_id'].append(dialog_id)
-            dset['scene_id'].append(scene_id)
-            dset['turn_id'].append(turn_id)
-            dset['object_id'].append(obj_id)
-            dset['labels'].append(labels)
-            dset['dialogue'].append(dialogue)
-            dset['image'].append(image_path)
-            dset['bbox'].append(bbox)
-            
-    meta_dset = datasets.Dataset.from_dict(meta_dset)
-    eval_dset = datasets.Dataset.from_dict(dset)
-    eval_dset = eval_dset.cast_column("image", datasets.Image(decode=True))
-    
+        # dset['dialog_id'].append(dialog_id)
+        # dset['scene_id'].append(scene_id)
+        # dset['turn_id'].append(turn_id)
+        dset['image'].append(image_path)
+        dset['image_id'].append(i)
+        dset['objects'].append(objects)
+        dset['dialogue'].append(dialogue)
+
+    dset = datasets.Dataset.from_dict(dset)
+    dset = dset.cast_column("image", datasets.Image(decode=True))
+
     if return_gt_labels:
-        return eval_dset, meta_dset, gold_data
+        return dset, gold_data
     else:
-        return eval_dset
+        return dset
