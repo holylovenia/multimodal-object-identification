@@ -66,9 +66,13 @@ def load_objects_in_scenes_dataset(
         
         for img_file_id in os.listdir(img_dir_path):
             img_file_path = os.path.join(img_dir_path, img_file_id)
-            scene_id = img_file_id.split(".")[0]                
-            scene_file_path = os.path.join(scene_dir_path, f"{scene_id}_scene.json")
-            
+            scene_id = img_file_id.split(".")[0]
+
+            if os.path.exists(f"{scene_dir_path}/{scene_id}_scene.json"):
+                scene_file_path = f"{scene_dir_path}/{scene_id}_scene.json"
+            elif os.path.exists(f"{scene_dir_path}/m_{scene_id}_scene.json"):
+                scene_file_path = f"{scene_dir_path}/m_{scene_id}_scene.json"
+                
             if os.path.isfile(scene_file_path):
                 data_dict["image"].append(img_file_path)
                 num_scenes = len(data_dict["image_id"])
@@ -133,32 +137,34 @@ def load_image_text_dataset(
         for img_file_id in os.listdir(img_dir_path):
             img_file_path = os.path.join(img_dir_path, img_file_id)
             scene_id = img_file_id.split(".")[0]                
-            scene_file_path = os.path.join(scene_dir_path, f"{scene_id}_scene.json")
-            
-            if os.path.isfile(scene_file_path):
 
-                scene_json = json.loads(open(scene_file_path).read())
-                scene_objects = scene_json["scenes"][0]["objects"]
-                objects = []
-                for scene_object in scene_objects:
-                    # In the case of invalid width or height
-                    if scene_object["bbox"][2] == 0 or scene_object["bbox"][3] == 0:
-                        continue
+            if os.path.exists(f"{scene_dir_path}/{scene_id}_scene.json"):
+                scene_file_path = f"{scene_dir_path}/{scene_id}_scene.json"
+            elif os.path.exists(f"{scene_dir_path}/m_{scene_id}_scene.json"):
+                scene_file_path = f"{scene_dir_path}/m_{scene_id}_scene.json"
 
-                    data_dict["image"].append(img_file_path)
-                    data_dict["bbox"].append(scene_object["bbox"])
-                    data_dict["object_id"].append(scene_object["unique_id"])
-                    
-                    attrs = {}
-                    if fashion_prefab.get(scene_object["prefab_path"]) is not None:
-                        item = fashion_prefab[scene_object["prefab_path"]]
-                        for f_attr in include_fashion_attrs:
-                            attrs[f_attr] = item[f_attr]
-                    else:
-                        item = furniture_prefab[scene_object["prefab_path"]]
-                        for f_attr in include_furniture_attrs:
-                            attrs[f_attr] = item[f_attr]
-                    data_dict["attrs"].append(attrs)
+            scene_json = json.loads(open(scene_file_path).read())
+            scene_objects = scene_json["scenes"][0]["objects"]
+            objects = []
+            for scene_object in scene_objects:
+                # In the case of invalid width or height
+                if scene_object["bbox"][2] == 0 or scene_object["bbox"][3] == 0:
+                    continue
+
+                data_dict["image"].append(img_file_path)
+                data_dict["bbox"].append(scene_object["bbox"])
+                data_dict["object_id"].append(scene_object["unique_id"])
+
+                attrs = {}
+                if fashion_prefab.get(scene_object["prefab_path"]) is not None:
+                    item = fashion_prefab[scene_object["prefab_path"]]
+                    for f_attr in include_fashion_attrs:
+                        attrs[f_attr] = item[f_attr]
+                else:
+                    item = furniture_prefab[scene_object["prefab_path"]]
+                    for f_attr in include_furniture_attrs:
+                        attrs[f_attr] = item[f_attr]
+                data_dict["attrs"].append(attrs)
 
     dataset = datasets.Dataset.from_dict(data_dict)
     dataset = dataset.cast_column("image", datasets.Image(decode=True))
@@ -200,7 +206,7 @@ def load_image_conv_dataset(
     gold_data = json.load(open(raw_data['source_path'],'r'))
     
     dset = {
-        'dialog_id': [], 'turn_id': [], 'object_id': [],
+        'dialog_id': [], 'scene_id': [], 'turn_id': [], 'object_id': [],
         'prefab_object_id': [], 'other_ambig_object_unique_ids': [],
         'dialogue': [], 'image': [], 'bbox': []
     }
@@ -212,6 +218,7 @@ def load_image_conv_dataset(
 
         # Scene
         scene_path = row['image_name'].replace('.png','_scene.json')
+        scene_id = row['image_name'].split(".")[0]
         if os.path.exists(f"{scene_dir_path}/{scene_path}"):
             scene_path = f"{scene_dir_path}/{scene_path}"
         elif os.path.exists(f"{scene_dir_path}/m_{scene_path}"):
@@ -241,6 +248,7 @@ def load_image_conv_dataset(
         dialogue = data[0]["input_text"]
         for obj_id, (bbox, prefab_obj_id, other_ambig_object_unique_ids) in scene_dict.items():
             dset['dialog_id'].append(dialog_id)
+            dset['scene_id'].append(scene_id)
             dset['turn_id'].append(turn_id)
             dset['object_id'].append(obj_id)
             dset['prefab_object_id'].append(prefab_obj_id)
@@ -278,7 +286,7 @@ def load_image_text_eval_dataset(
         'dialogue': [], 'image': [], 'bbox': []
     }
     meta_dset = {
-        'dialog_id': [], 'turn_id': [], 'object_id': [], 'labels': []
+        'dialog_id': [], 'scene_id': [], 'turn_id': [], 'object_id': [], 'labels': []
     }
     for row in data:
         # Dialogue idx to labels
@@ -289,6 +297,7 @@ def load_image_text_eval_dataset(
 
         # Scene
         scene_path = row['image_name'].replace('.png','_scene.json')
+        scene_id = row['image_name'].split(".")[0]
         if os.path.exists(f"{scene_dir_path}/{scene_path}"):
             scene_path = f"{scene_dir_path}/{scene_path}"
         elif os.path.exists(f"{scene_dir_path}/m_{scene_path}"):
@@ -313,6 +322,7 @@ def load_image_text_eval_dataset(
         dialogue = data[0]["input_text"]
         for obj_id, bbox in scene_dict.items():
             meta_dset['dialog_id'].append(dialog_id)
+            meta_dset['scene_id'].append(scene_id)
             meta_dset['turn_id'].append(turn_id)
             meta_dset['object_id'].append(obj_id)
             meta_dset['labels'].append(labels)
@@ -328,6 +338,18 @@ def load_image_text_eval_dataset(
         return eval_dset, meta_dset, gold_data
     else:
         return eval_dset
+
+def convert_dialogue_to_caption(example_batch, num_utterances=3, utterance_turn='both'):
+    utterances = []
+    for turn_id, turn in enumerate(example_batch['dialogue']):
+        if turn_id % 2 == 0:
+            if utterance_turn == 'both' or utterance_turn =='user':
+                utterances.append("<USER> " + turn)
+        else:
+            if utterance_turn == 'both' or utterance_turn =='system':
+                utterances.append("<SYS> " + turn)
+    example_batch['caption'] = (" ".join(utterances[-num_utterances:])).lower()
+    return example_batch
 
 def convert_dialogue_to_caption(example_batch, num_utterances=3, utterance_turn='both'):
     utterances = []
