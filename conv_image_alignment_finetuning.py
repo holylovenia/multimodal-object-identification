@@ -194,8 +194,10 @@ def run(model_args, data_args, training_args):
     # if data_args.max_seq_length > 77: # CLIP's default absolute max position embeddings
     #     config.update({"max_position_embeddings": data_args.max_seq_length})
     if model_args.include_other_similar_objects is False and model_args.include_other_referred_objects is False:
+        print("CLIP")
         model = CLIPModel.from_pretrained(model_args.model_name_or_path)
     else:
+        print("CLIPPER", model_args.include_other_similar_objects, model_args.include_other_referred_objects)
         model = CLIPPERModel.from_pretrained(model_args.model_name_or_path)
         model.modify_learning_objective(model_args)
     # if data_args.max_seq_length > 77: # CLIP's default absolute max position embeddings

@@ -68,7 +68,7 @@ def run(model_args, data_args, training_args):
     os.makedirs(cache_dir_path, exist_ok=True)
 
     # Data loading
-    eval_dset, meta_dset, gold_data = data_utils.load_image_text_eval_dataset()
+    eval_dset, meta_dset, gold_data = data_utils.load_image_text_eval_dataset(data_path=data_args.devtest_dataset_path)
     # eval_dset = eval_dset.train_test_split(0.05)['test']
     
     if (data_args.prediction_path is None or not os.path.exists(data_args.prediction_path)):
@@ -200,7 +200,7 @@ def run(model_args, data_args, training_args):
             # indexes = range(len(logits))
 
             # ORACLE
-            indexes = np.argpartition(logits, -num_labels)[-num_labels:]
+            # indexes = np.argpartition(logits, -num_labels)[-num_labels:]
 
             # Top-k
             # indexes = np.argpartition(logits, -min(len(logits), 15))[-min(len(logits), 15):]
@@ -208,7 +208,7 @@ def run(model_args, data_args, training_args):
             # THRESHOLD
             # indexes =  np.where(logits > np.mean(logits))[0]
             # indexes =  np.where(logits > np.min(logits))[0]
-            # indexes =  np.where(logits > np.median(logits))[0]
+            indexes =  np.where(logits > np.median(logits))[0]
             # print(logits)
             # logits = torch.sigmoid(torch.from_numpy(logits))
             # indexes = np.where(logits >= 0.5)[0]
