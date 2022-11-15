@@ -41,21 +41,14 @@ def run(model_args, data_args, training_args):
 
     # Data loading
     MAPPING = data_utils.load_categories()
-    dataset, MAPPING = data_utils.load_objects_in_scenes_dataset(mapping=MAPPING)
-
+    scene_dataset, MAPPING = data_utils.load_objects_in_scenes_dataset(mapping=MAPPING)
+    conv_dataset = data_utils.load_sitcom_detr_dataset(mapping=MAPPING, return_gt_labels=False)
+    
     # Preprocessing
     tokenizer = transformers.AutoTokenizer.from_pretrained(model_args.text_model_name_or_path)
     feature_extractor = transformers.AutoFeatureExtractor.from_pretrained(model_args.model_name_or_path)
 
-    dataset = dataset.map(
-        data_utils.compute_image_area,
-        num_proc=data_args.preprocessing_num_workers,
-        desc="compute image area",
-        load_from_cache_file=True,
-        cache_file_name=os.path.join(cache_dir_path, "ds_area.arrow"),
-        remove_columns=None
-    )
-    dataset = dataset.map(
+    scene_dataset = scene_dataset.map(
         data_utils.add_empty_dialogue,
         num_proc=data_args.preprocessing_num_workers,
         desc="adding empty dialogue",
@@ -63,6 +56,18 @@ def run(model_args, data_args, training_args):
         cache_file_name=os.path.join(cache_dir_path, "ds_dialogue.arrow"),
         remove_columns=None
     )
+    
+    dataset = datasets.concatenate_datasets([scene_dataset, conv_dataset])
+        
+    dataset = dataset.map(
+        data_utils.compute_image_area,
+        num_proc=data_args.preprocessing_num_workers,
+        desc="compute image area",
+        load_from_cache_file=False,
+        cache_file_name=os.path.join(cache_dir_path, "ds_area.arrow"),
+        remove_columns=None
+    )
+    
     dataset = dataset.map(
         data_utils.convert_dialogue_to_caption,
         num_proc=data_args.preprocessing_num_workers,
@@ -101,6 +106,7 @@ def run(model_args, data_args, training_args):
 
     # Training and evaluation
     text_collator = DataCollatorWithPadding(tokenizer)
+    
     def collate_fn(batch):
         pixel_values = [item["pixel_values"] for item in batch]
         encoding = feature_extractor.pad_and_create_pixel_mask(
