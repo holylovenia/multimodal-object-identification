@@ -41,8 +41,20 @@ def run(model_args, data_args, training_args):
 
     # Data loading
     MAPPING = data_utils.load_categories()
-    scene_dataset, MAPPING = data_utils.load_objects_in_scenes_dataset(mapping=MAPPING)
-    conv_dataset = data_utils.load_sitcom_detr_dataset(mapping=MAPPING, return_gt_labels=False)
+    scene_dset, MAPPING = data_utils.load_objects_in_scenes_dataset(mapping=MAPPING)    
+    
+    conv_train_dset = data_utils.load_sitcom_detr_dataset(
+        data_path='./preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_train.json'
+        mapping=MAPPING, return_gt_labels=False
+    )
+    conv_dev_dset = data_utils.load_sitcom_detr_dataset(
+        data_path='./preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_dev.json'
+        mapping=MAPPING, return_gt_labels=False
+    )
+    conv_test_dset = data_utils.load_sitcom_detr_dataset(
+        data_path='./preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_devtest.json'
+        mapping=MAPPING, return_gt_labels=False
+    )
     
     # Preprocessing
     tokenizer = transformers.AutoTokenizer.from_pretrained(model_args.text_model_name_or_path)
@@ -57,7 +69,10 @@ def run(model_args, data_args, training_args):
         remove_columns=None
     )
     
-    dataset = datasets.concatenate_datasets([scene_dataset, conv_dataset])
+    dataset = datasets.DatasetDict({
+        'train': datasets.concatenate_datasets([scene_dset, conv_train_dset]), 
+        'valid': conv_dev_dset, 'test': conv_test_dset
+    })
         
     dataset = dataset.map(
         data_utils.compute_image_area,
@@ -77,6 +92,7 @@ def run(model_args, data_args, training_args):
         fn_kwargs={"num_utterances": data_args.num_utterances},
         remove_columns=["dialogue"]
     )
+    
     dataset = dataset.map(
         data_utils.tokenize_text,
         num_proc=data_args.preprocessing_num_workers,
@@ -86,8 +102,6 @@ def run(model_args, data_args, training_args):
         fn_kwargs={"tokenizer": tokenizer, "text_column_name": "caption"},
         remove_columns=["caption"]
     )
-    raw_datasets = dataset.train_test_split(0.1)
-    raw_datasets["all"] = dataset
 
     def transform(example_batch):
         images = [image.convert("RGB") for image in example_batch["image"]]
@@ -99,10 +113,11 @@ def run(model_args, data_args, training_args):
         for key, value in features.items():
             example_batch[key] = value
         return example_batch
-    proc_datasets = deepcopy(raw_datasets)
+    
+    proc_datasets = deepcopy(dataset)
     proc_datasets["train"] = proc_datasets["train"].with_transform(transform)
+    proc_datasets["valid"] = proc_datasets["valid"].with_transform(transform)
     proc_datasets["test"] = proc_datasets["test"].with_transform(transform)
-    proc_datasets["all"] = proc_datasets["all"].with_transform(transform)
 
     # Training and evaluation
     text_collator = DataCollatorWithPadding(tokenizer)
@@ -139,12 +154,24 @@ def run(model_args, data_args, training_args):
     holy_detr = HolyDetrForObjectDetection(config, text_model)
     holy_detr.load_state_dict(detr_model.state_dict(), strict=False)
     
+    def compute_metrics():
+        for threshold in [0.5, 0.6, 0.7, 0.8, 0.9]:
+            # keep only predictions of queries with 0.9+ confidence (excluding no-object class)
+            probas = outputs.logits.softmax(-1)[0, :, :-1]
+            keep = probas.max(-1).values >= threshold
+
+            # rescale bounding boxes
+            target_sizes = torch.tensor(im.size[::-1]).unsqueeze(0)
+            postprocessed_outputs = feature_extractor.post_process(outputs, target_sizes)
+            bboxes_scaled = postprocessed_outputs[0]['boxes'][keep]
+    
     trainer = DetrTrainer(
         model=holy_detr,
         args=training_args,
         data_collator=collate_fn,
         train_dataset=proc_datasets["train"],
-        eval_dataset=proc_datasets["test"],
+        eval_dataset=proc_datasets["valid"],
+        comput_metrics=compute_metrics,
         tokenizer=feature_extractor,
         callbacks=[transformers.EarlyStoppingCallback(early_stopping_patience=10)],
     )
@@ -154,13 +181,13 @@ def run(model_args, data_args, training_args):
     trainer.save_model()
 
     # Evaluation
+    metrics = trainer.evaluate(proc_datasets["valid"])
+    trainer.log_metrics("eval", metrics)
+    trainer.save_metrics("eval", metrics)
+
     metrics = trainer.evaluate(proc_datasets["test"])
     trainer.log_metrics("test", metrics)
     trainer.save_metrics("test", metrics)
-
-    metrics = trainer.evaluate(proc_datasets["all"])
-    trainer.log_metrics("all", metrics)
-    trainer.save_metrics("all", metrics)
     
     # # Prediction
     # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
