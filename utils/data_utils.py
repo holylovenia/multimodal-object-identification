@@ -213,11 +213,12 @@ def load_image_conv_dataset(
         'prefab_object_id': [], 'other_ambig_object_unique_ids': [],
         'dialogue': [], 'image': [], 'bbox': []
     }
-    for row in data:
+    for row_id, row in enumerate(data):
         # Dialogue idx to labels
         dialog_id = row['dialog_id']
         turn_id = row['turn_id']
         labels = row['ambiguous_candidates']
+        object_map = row['object_map']
 
         # Scene
         scene_path = row['image_name'].replace('.png','_scene.json')
@@ -229,18 +230,25 @@ def load_image_conv_dataset(
 
         scene = json.load(open(scene_path, 'r'))
         scene_dict = {}
-        for scene_objects in scene['scenes']:
-            for obj in scene_objects['objects']:
-                if obj["index"] in labels: # ambigous conv-image pair
-                    other_ambig_object_ids = labels
-                    other_ambig_object_ids.remove(obj['index'])
 
-                    other_ambig_object_unique_ids = []
-                    for id in other_ambig_object_ids:
-                        for scene_obj in scene_objects["objects"]: # iterate over all objects in the scene
-                            if scene_obj["index"] == id: # if they have the same index
-                                other_ambig_object_unique_ids.append(scene_obj["unique_id"])
-                    scene_dict[obj['index']] = (obj['bbox'], obj['unique_id'], other_ambig_object_unique_ids)
+        for scene_objects in scene['scenes']:
+            
+            index_mapping = {obj['index']: local_object_id \
+                for local_object_id, obj in zip(object_map, scene_objects['objects'])}
+            local_to_prefab_index_mapping = {local_object_id: obj['unique_id'] \
+                for local_object_id, obj in zip(object_map, scene_objects['objects'])}
+
+            for obj in scene_objects['objects']:
+                local_object_id = index_mapping[obj['index']]
+                if local_object_id in labels: # ambigous conv-image pair
+                    other_ambig_object_ids = labels.copy()
+                    other_ambig_object_ids.remove(local_object_id)
+
+                    other_ambig_object_unique_ids = [local_to_prefab_index_mapping[local_id] for local_id in other_ambig_object_ids]
+                    scene_dict[index_mapping[obj['index']]] = (obj['bbox'], obj['unique_id'], other_ambig_object_unique_ids)
+                
+                # if dialog_id == 11496:
+                #     print(dialog_id, turn_id, obj_id, other_ambig_object_unique_ids, dialogue)
 
         image_path = row['image_name']
         for img_dir_path in img_dir_paths:
@@ -314,6 +322,7 @@ def load_image_text_eval_dataset(
                 index_mapping[obj['index']] = obj_id
             
             for obj in scene_objects['objects']:
+                # if index_mapping[obj['index']] in labels:
                 scene_dict[index_mapping[obj['index']]] = obj['bbox']
 
         image_path = row['image_name']

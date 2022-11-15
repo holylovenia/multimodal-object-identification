@@ -113,21 +113,21 @@ def run(model_args, data_args, training_args):
     train_transforms = Compose(
             [
                 Resize(feature_extractor.size),
-                CenterCrop(feature_extractor.size),
-                RandomHorizontalFlip(),
-                RandomVerticalFlip(),
-                RandomRotation(5),            
+                # CenterCrop(feature_extractor.size),
+                # RandomHorizontalFlip(),
+                # RandomVerticalFlip(),
+                # RandomRotation(5),            
                 ToTensor(),
-                normalize,
+                # normalize,
             ]
         )
 
     eval_transforms = Compose(
             [
                 Resize(feature_extractor.size),
-                CenterCrop(feature_extractor.size),
+                # CenterCrop(feature_extractor.size),
                 ToTensor(),
-                normalize,
+                # normalize,
             ]
         )
 
