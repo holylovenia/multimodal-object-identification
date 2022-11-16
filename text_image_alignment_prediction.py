@@ -101,9 +101,9 @@ def run(model_args, data_args, training_args):
         eval_transforms = Compose(
             [
                 Resize(feature_extractor.size),
-                CenterCrop(feature_extractor.size),
+                # CenterCrop(feature_extractor.size),
                 ToTensor(),
-                normalize,
+                # normalize,
             ]
         )
 
@@ -200,7 +200,7 @@ def run(model_args, data_args, training_args):
             # indexes = range(len(logits))
 
             # ORACLE
-            # indexes = np.argpartition(logits, -num_labels)[-num_labels:]
+            indexes = np.argpartition(logits, -num_labels)[-num_labels:]
 
             # Top-k
             # indexes = np.argpartition(logits, -min(len(logits), 15))[-min(len(logits), 15):]
@@ -208,7 +208,7 @@ def run(model_args, data_args, training_args):
             # THRESHOLD
             # indexes =  np.where(logits > np.mean(logits))[0]
             # indexes =  np.where(logits > np.min(logits))[0]
-            indexes =  np.where(logits > np.median(logits))[0]
+            # indexes =  np.where(logits > np.median(logits))[0]
             # print(logits)
             # logits = torch.sigmoid(torch.from_numpy(logits))
             # indexes = np.where(logits >= 0.5)[0]

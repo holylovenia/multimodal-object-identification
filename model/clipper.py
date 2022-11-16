@@ -39,7 +39,7 @@ def contrastive_loss(
                     if pid == other_id:
                         indices_of_other_ambig_objs_in_dialogue.append(index)
             # print("other", indices_of_other_ambig_objs_in_dialogue)
-
+            
         if include_other_similar_objects and include_other_referred_objects:
             indices_of_ambiguous_objs = list(set(indices_of_same_prefab_objs + indices_of_other_ambig_objs_in_dialogue))
         elif include_other_similar_objects:
@@ -66,7 +66,7 @@ def clip_loss(
         include_other_similar_objects, include_other_referred_objects)
     image_loss = contrastive_loss(
         similarity.t(), prefab_object_ids, other_ambig_object_unique_ids,
-        include_other_similar_objects, include_other_similar_objects)
+        include_other_similar_objects, include_other_referred_objects)
     return (caption_loss + image_loss) / 2.0
 
 class CLIPPERModel(CLIPModel):
@@ -154,6 +154,7 @@ class CLIPPERModel(CLIPModel):
 
         loss = None
         if return_loss:
+            print(self.include_other_similar_objects, self.include_other_referred_objects)
             loss = clip_loss(
                 logits_per_text, prefab_object_ids, other_ambig_object_unique_ids,
                 self.include_other_similar_objects, self.include_other_referred_objects)
