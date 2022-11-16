@@ -213,6 +213,7 @@ def load_image_conv_dataset(
         'prefab_object_id': [], 'other_ambig_object_unique_ids': [],
         'dialogue': [], 'image': [], 'bbox': []
     }
+    
     for row_id, row in enumerate(data):
         # Dialogue idx to labels
         dialog_id = row['dialog_id']
@@ -244,7 +245,13 @@ def load_image_conv_dataset(
                     other_ambig_object_ids = labels.copy()
                     other_ambig_object_ids.remove(local_object_id)
 
-                    other_ambig_object_unique_ids = [local_to_prefab_index_mapping[local_id] for local_id in other_ambig_object_ids]
+                    other_ambig_object_unique_ids = []
+                    for local_id in other_ambig_object_ids:
+                        if local_id in local_to_prefab_index_mapping:
+                            other_ambig_object_unique_ids.append(local_to_prefab_index_mapping[local_id])
+                        else:
+                            other_ambig_object_unique_ids.append(local_id)
+                            
                     scene_dict[index_mapping[obj['index']]] = (obj['bbox'], obj['unique_id'], other_ambig_object_unique_ids)
                 
                 # if dialog_id == 11496:

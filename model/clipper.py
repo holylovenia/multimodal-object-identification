@@ -154,7 +154,6 @@ class CLIPPERModel(CLIPModel):
 
         loss = None
         if return_loss:
-            print(self.include_other_similar_objects, self.include_other_referred_objects)
             loss = clip_loss(
                 logits_per_text, prefab_object_ids, other_ambig_object_unique_ids,
                 self.include_other_similar_objects, self.include_other_referred_objects)
