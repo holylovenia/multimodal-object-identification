@@ -171,37 +171,28 @@ def run(model_args, data_args, training_args):
         giou_cost=holy_detr.config.giou_cost
     )
     def compute_metrics(p: EvalPrediction):
-        print('p: EvalPrediction')
-        print('p.predictions')
-        print(p.predictions)
-        print('p.label_ids')
-        print(p.label_ids)
-        preds = p.predictions[0] if isinstance(p.predictions, tuple) else p.predictions
-        preds = np.argmax(preds, axis=1)
-        for threshold in [0.5, 0.6, 0.7, 0.8, 0.9]:
-            # keep only predictions of queries with 0.9+ confidence (excluding no-object class)
-            probas = p.predictions.logits.softmax(-1)[0, :, :-1]
-            keep = probas.max(-1).values >= threshold
-            cls_labels = probas[keep].argmax()
+        # p.prediction: Dict{'pred_logits': Tensor, 'pred_boxes': Tensor}
+        # p.labels_ids: List[Dict{'class_labels': Tensor, 'pred_boxes': Tensor}]
+        labels = p.label_ids
+        outputs = p.predictions
+        
+        no_obj_idx = outputs['logits'].shape[-1] # index of no object prediction
+        probas = outputs['logits'].softmax(-1)
+        cls_preds = probas.argmax(dim=-1)
+        boxes_preds = outputs['pred_boxes']
+        indices = matcher(outputs, labels) 
+        
+        # probas: torch.Size([414, 100, 29])
+        # cls_preds: torch.Size([414, 100])
+        # boxes_preds: torch.Size([414, 100, 4])
+        # labels: List[Dict{'class_labels': Tensor, 'pred_boxes': Tensor}] (len 414)
+        # indices: List[Tuple<pred_idxs, gt_idxs>] (len 414)
+        for prob, cls_pred, boxes_pred, label, (pred_idxs, gt_idxs) in zip(proba, cls_preds, boxes_preds, labels, indices): 
+            sorted_pred_indices = torch.tensor([p for _, p in sorted(zip(gt_indices, pred_indices))])
+            sorted_gt_indices = torch.tensor([g for g, _ in sorted(zip(gt_indices, pred_indices))])
+            pred_boxes = torch.index_select(outputs['pred_boxes'], 0, sorted_pred_indices)
 
-            # rescale bounding boxes
-            target_sizes = torch.tensor(im.size[::-1]).unsqueeze(0)
-            postprocessed_outputs = feature_extractor.post_process(outputs, target_sizes)
-            bboxes_scaled = postprocessed_outputs[0]['boxes'][keep]
-            
-            pred_results = {}
-            indices = matcher(
-                outputs,
-                [{"class_labels": cls_labels, "boxes": bboxes_scaled}]
-            )
-
-            pred_indices, gt_indices = indices[0]
-            sorted_pred_indices = torch.tensor([p for _, p in sorted(zip(gt_indices, pred_indices))]).to(device)
-            sorted_gt_indices = torch.tensor([g for g, _ in sorted(zip(gt_indices, pred_indices))]).to(device)
-            gt_num_objects = batch["labels"]["boxes"].shape[0]
-            pred_boxes = torch.index_select(bboxes_scaled, 0, sorted_pred_indices)
-            
-            return sorted_gt_indices
+        return sorted_gt_indices
     
     trainer = DetrTrainer(
         model=holy_detr,

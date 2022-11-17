@@ -151,7 +151,7 @@ class DetrTrainer(transformers.Trainer):
         # if len(logits) == 1:
         #     logits = logits[0]
 
-        return (loss, logits, labels)
+        return (loss, outputs, labels)
     
     def evaluation_loop(
         self,
@@ -216,13 +216,15 @@ class DetrTrainer(transformers.Trainer):
         # Initialize containers
         # losses/preds/labels on GPU/TPU (accumulated for eval_accumulation_steps)
         losses_host = None
-        preds_host = None
+        pred_logits_host = None
+        pred_boxes_host = None
         labels_host = None
         inputs_host = None
 
         # losses/preds/labels on CPU (final containers)
         all_losses = None
-        all_preds = None
+        all_pred_logits = None
+        all_pred_boxes = None
         all_labels = None
         all_inputs = None
         # Will be useful when we have an iterable dataset so don't know its length.
@@ -239,9 +241,9 @@ class DetrTrainer(transformers.Trainer):
                     batch_size = observed_batch_size
 
             # Prediction step
-            loss, logits, labels = self.prediction_step(model, inputs, prediction_loss_only, ignore_keys=ignore_keys)
+            loss, outputs, labels = self.prediction_step(model, inputs, prediction_loss_only, ignore_keys=ignore_keys)
             inputs_decode = self._prepare_input(inputs["input_ids"]) if args.include_inputs_for_metrics else None
-
+            
             if is_torch_tpu_available():
                 xm.mark_step()
 
@@ -262,12 +264,17 @@ class DetrTrainer(transformers.Trainer):
                     if inputs_host is None
                     else nested_concat(inputs_host, inputs_decode, padding_index=-100)
                 )
-            if logits is not None:
-                logits = self._pad_across_processes(logits)
+            if outputs is not None:
+                logits = self._pad_across_processes(outputs.logits)
+                boxes = self._pad_across_processes(outputs.pred_boxes)
                 logits = self._nested_gather(logits)
+                boxes = self._nested_gather(boxes)
                 if self.preprocess_logits_for_metrics is not None:
                     logits = self.preprocess_logits_for_metrics(logits, labels)
-                preds_host = logits if preds_host is None else nested_concat(preds_host, logits, padding_index=-100)
+                pred_logits_host = logits if pred_logits_host is None else \
+                    nested_concat(pred_logits_host, logits, padding_index=-100)
+                pred_boxes_host = boxes if pred_boxes_host is None else \
+                    nested_concat(pred_boxes_host, boxes, padding_index=-100)
             self.control = self.callback_handler.on_prediction_step(args, self.state, self.control)
 
             # Gather all tensors and put them back on the CPU if we have done enough accumulation steps.
@@ -275,9 +282,14 @@ class DetrTrainer(transformers.Trainer):
                 if losses_host is not None:
                     losses = nested_numpify(losses_host)
                     all_losses = losses if all_losses is None else np.concatenate((all_losses, losses), axis=0)
-                if preds_host is not None:
-                    logits = nested_numpify(preds_host)
-                    all_preds = logits if all_preds is None else nested_concat(all_preds, logits, padding_index=-100)
+                if pred_logits_host is not None:
+                    logits = nested_numpify(pred_logits_host)
+                    all_pred_logits = logits if all_pred_logits is None else \
+                        nested_concat(all_pred_logits, logits, padding_index=-100)
+                if pred_boxes_host is not None:
+                    boxes = nested_numpify(pred_boxes_host)
+                    all_pred_boxes = boxes if all_pred_boxes is None else \
+                        nested_concat(all_pred_boxes, boxes, padding_index=-100)
                 if inputs_host is not None:
                     inputs_decode = nested_numpify(inputs_host)
                     all_inputs = (
@@ -289,14 +301,14 @@ class DetrTrainer(transformers.Trainer):
                     for label in labels_host:
                         for key, value in label.items():
                             label[key] = value.to('cpu')
-                    all_labels = labels if all_labels is None else all_labels + labels
+                    all_labels = labels_host if all_labels is None else all_labels + labels_host
                     # labels = nested_numpify(labels_host)
                     # all_labels = (
                     #     labels if all_labels is None else nested_concat(all_labels, labels, padding_index=-100)
                     # )
 
                 # Set back to None to begin a new accumulation
-                losses_host, preds_host, inputs_host, labels_host = None, None, None, None
+                losses_host, pred_logits_host, pred_boxes_host, inputs_host, labels_host = None, None, None, None, None
 
         if args.past_index and hasattr(self, "_past"):
             # Clean the state at the end of the evaluation loop
@@ -306,17 +318,24 @@ class DetrTrainer(transformers.Trainer):
         if losses_host is not None:
             losses = nested_numpify(losses_host)
             all_losses = losses if all_losses is None else np.concatenate((all_losses, losses), axis=0)
-        if preds_host is not None:
-            logits = nested_numpify(preds_host)
-            all_preds = logits if all_preds is None else nested_concat(all_preds, logits, padding_index=-100)
+        if pred_logits_host is not None:
+            logits = nested_numpify(pred_logits_host)
+            all_pred_logits = logits if all_pred_logits is None else nested_concat(all_pred_logits, logits, padding_index=-100)
+        if pred_boxes_host is not None:
+            boxes = nested_numpify(pred_boxes_host)
+            all_pred_boxes = boxes if all_pred_boxes is None else nested_concat(all_pred_boxes, boxes, padding_index=-100)
         if inputs_host is not None:
             inputs_decode = nested_numpify(inputs_host)
             all_inputs = (
                 inputs_decode if all_inputs is None else nested_concat(all_inputs, inputs_decode, padding_index=-100)
             )
         if labels_host is not None:
-            labels = nested_numpify(labels_host)
-            all_labels = labels if all_labels is None else nested_concat(all_labels, labels, padding_index=-100)
+            for label in labels_host:
+                for key, value in label.items():
+                    label[key] = value.to('cpu')
+            all_labels = labels_host if all_labels is None else all_labels + labels_host
+            # labels = nested_numpify(labels_host)
+            # all_labels = labels if all_labels is None else nested_concat(all_labels, labels, padding_index=-100)
         # Number of samples
         if has_length(eval_dataset):
             num_samples = len(eval_dataset)
@@ -332,12 +351,15 @@ class DetrTrainer(transformers.Trainer):
         if num_samples == 0 and observed_num_examples > 0:
             num_samples = observed_num_examples
 
+        print('len(eval_dataset)', len(eval_dataset))
         # Number of losses has been rounded to a multiple of batch_size and in a distributed training, the number of
         # samplers has been rounded to a multiple of batch_size, so we truncate.
         if all_losses is not None:
             all_losses = all_losses[:num_samples]
-        if all_preds is not None:
-            all_preds = nested_truncate(all_preds, num_samples)
+        if all_pred_logits is not None:
+            all_pred_logits = nested_truncate(all_pred_logits, num_samples)
+        if all_pred_boxes is not None:
+            all_pred_boxes = nested_truncate(all_pred_boxes, num_samples)
         if all_labels is not None:
             # all_labels = nested_truncate(all_labels, num_samples)
             all_labels = all_labels
@@ -345,7 +367,14 @@ class DetrTrainer(transformers.Trainer):
             all_inputs = nested_truncate(all_inputs, num_samples)
 
         # Metrics!
-        if self.compute_metrics is not None and all_preds is not None and all_labels is not None:
+        if self.compute_metrics is not None \
+            and all_pred_logits is not None \
+            and all_pred_boxes is not None \
+            and all_labels is not None:
+            all_preds = {
+                'logits': torch.from_numpy(all_pred_logits).float(),
+                'pred_boxes': torch.from_numpy(all_pred_boxes).float()
+            }
             if args.include_inputs_for_metrics:
                 metrics = self.compute_metrics(
                     EvalPrediction(predictions=all_preds, label_ids=all_labels, inputs=all_inputs)
