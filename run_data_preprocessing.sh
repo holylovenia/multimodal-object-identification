@@ -15,4 +15,5 @@ DATA_FOLDER="/home/holy/datasets/simmc2.1/"
 # 	--coref_candidates_save_path "./preprocessed_data/coref_candidates|no_mm/"
 
 cd simmc2/model/mm_dst
-./run_preprocess_gpt2.sh "/home/holy/projects/ambiguous-mm-dialogue/preprocessed_data/coref_candidates|mm" /home/holy/datasets/simmc2.1
+./run_preprocess_gpt2.sh "/home/holy/projects/ambiguous-mm-dialogue/preprocessed_data/coref_candidates|no_mm" /home/holy/datasets/simmc2.1
+# ./run_preprocess_gpt2.sh "/home/holy/projects/ambiguous-mm-dialogue/preprocessed_data/coref_candidates|mm" /home/holy/datasets/simmc2.1

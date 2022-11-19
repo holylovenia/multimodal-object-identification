@@ -59,6 +59,9 @@ class DataArguments:
     prediction_path: Optional[str] = field(
         default=None
     )
+    additional_special_token_path: Optional[str] = field(
+        default=None
+    )
 
 @dataclass
 class TrainingArguments(TrainingArguments):
