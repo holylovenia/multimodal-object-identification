@@ -1,4 +1,4 @@
-CUDA_VISIBLE_DEVICES=1 python text_image_alignment_finetuning.py \
+CUDA_VISIBLE_DEVICES=3 python text_image_alignment_finetuning.py \
     --output_dir="./save/coref_candidates|no_mm/text-im-align/clip" \
     --cache_dir="./cache/coref_candidates|no_mm/text-im-align/clip" \
     --model_name_or_path="openai/clip-vit-base-patch32" \
