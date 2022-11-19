@@ -10,6 +10,21 @@ from utils.args_helper import (
 )
 from tqdm import tqdm
 from trainer.detr_trainer import DetrTrainer
+from transformers import (
+    AutoConfig,
+    AutoModelForSequenceClassification,
+    AutoTokenizer,
+    DataCollatorWithPadding,
+    EvalPrediction,
+    HfArgumentParser,
+    PretrainedConfig,
+    Trainer,
+    TrainingArguments,
+    default_data_collator,
+    set_seed,
+    EarlyStoppingCallback
+)
+from transformers.models.detr.modeling_detr import DetrHungarianMatcher
 from transformers import HfArgumentParser, DataCollatorWithPadding
 from transformers.trainer_utils import get_last_checkpoint, is_main_process
 from typing import Dict, Union, Any, Optional, List, Tuple
@@ -44,15 +59,15 @@ def run(model_args, data_args, training_args):
     scene_dset, MAPPING = data_utils.load_objects_in_scenes_dataset(mapping=MAPPING)    
     
     conv_train_dset = data_utils.load_sitcom_detr_dataset(
-        data_path='./preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_train.json'
+        data_path=data_args.train_dataset_path,
         mapping=MAPPING, return_gt_labels=False
     )
     conv_dev_dset = data_utils.load_sitcom_detr_dataset(
-        data_path='./preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_dev.json'
+        data_path=data_args.dev_dataset_path,
         mapping=MAPPING, return_gt_labels=False
     )
     conv_test_dset = data_utils.load_sitcom_detr_dataset(
-        data_path='./preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_devtest.json'
+        data_path=data_args.devtest_dataset_path,
         mapping=MAPPING, return_gt_labels=False
     )
     
@@ -60,12 +75,11 @@ def run(model_args, data_args, training_args):
     tokenizer = transformers.AutoTokenizer.from_pretrained(model_args.text_model_name_or_path)
     feature_extractor = transformers.AutoFeatureExtractor.from_pretrained(model_args.model_name_or_path)
 
-    scene_dataset = scene_dataset.map(
+    scene_dset = scene_dset.map(
         data_utils.add_empty_dialogue,
         num_proc=data_args.preprocessing_num_workers,
         desc="adding empty dialogue",
         load_from_cache_file=False,
-        cache_file_name=os.path.join(cache_dir_path, "ds_dialogue.arrow"),
         remove_columns=None
     )
     
@@ -78,8 +92,7 @@ def run(model_args, data_args, training_args):
         data_utils.compute_image_area,
         num_proc=data_args.preprocessing_num_workers,
         desc="compute image area",
-        load_from_cache_file=False,
-        cache_file_name=os.path.join(cache_dir_path, "ds_area.arrow"),
+        load_from_cache_file=True,
         remove_columns=None
     )
     
@@ -88,7 +101,6 @@ def run(model_args, data_args, training_args):
         num_proc=data_args.preprocessing_num_workers,
         desc="convert object attributes to caption",
         load_from_cache_file=False,
-        cache_file_name=os.path.join(cache_dir_path, "ds_convert.arrow"),
         fn_kwargs={"num_utterances": data_args.num_utterances},
         remove_columns=["dialogue"]
     )
@@ -98,7 +110,6 @@ def run(model_args, data_args, training_args):
         num_proc=data_args.preprocessing_num_workers,
         desc="tokenize text data",
         load_from_cache_file=False,
-        cache_file_name=os.path.join(cache_dir_path, "ds_token.arrow"),
         fn_kwargs={"tokenizer": tokenizer, "text_column_name": "caption"},
         remove_columns=["caption"]
     )
@@ -154,16 +165,34 @@ def run(model_args, data_args, training_args):
     holy_detr = HolyDetrForObjectDetection(config, text_model)
     holy_detr.load_state_dict(detr_model.state_dict(), strict=False)
     
-    def compute_metrics():
-        for threshold in [0.5, 0.6, 0.7, 0.8, 0.9]:
-            # keep only predictions of queries with 0.9+ confidence (excluding no-object class)
-            probas = outputs.logits.softmax(-1)[0, :, :-1]
-            keep = probas.max(-1).values >= threshold
+    matcher = DetrHungarianMatcher(
+        class_cost=holy_detr.config.class_cost, 
+        bbox_cost=holy_detr.config.bbox_cost, 
+        giou_cost=holy_detr.config.giou_cost
+    )
+    def compute_metrics(p: EvalPrediction):
+        # p.prediction: Dict{'pred_logits': Tensor, 'pred_boxes': Tensor}
+        # p.labels_ids: List[Dict{'class_labels': Tensor, 'pred_boxes': Tensor}]
+        labels = p.label_ids
+        outputs = p.predictions
+        
+        no_obj_idx = outputs['logits'].shape[-1] # index of no object prediction
+        probas = outputs['logits'].softmax(-1)
+        cls_preds = probas.argmax(dim=-1)
+        boxes_preds = outputs['pred_boxes']
+        indices = matcher(outputs, labels) 
+        
+        # probas: torch.Size([414, 100, 29])
+        # cls_preds: torch.Size([414, 100])
+        # boxes_preds: torch.Size([414, 100, 4])
+        # labels: List[Dict{'class_labels': Tensor, 'pred_boxes': Tensor}] (len 414)
+        # indices: List[Tuple<pred_idxs, gt_idxs>] (len 414)
+        for prob, cls_pred, boxes_pred, label, (pred_idxs, gt_idxs) in zip(proba, cls_preds, boxes_preds, labels, indices): 
+            sorted_pred_indices = torch.tensor([p for _, p in sorted(zip(gt_indices, pred_indices))])
+            sorted_gt_indices = torch.tensor([g for g, _ in sorted(zip(gt_indices, pred_indices))])
+            pred_boxes = torch.index_select(outputs['pred_boxes'], 0, sorted_pred_indices)
 
-            # rescale bounding boxes
-            target_sizes = torch.tensor(im.size[::-1]).unsqueeze(0)
-            postprocessed_outputs = feature_extractor.post_process(outputs, target_sizes)
-            bboxes_scaled = postprocessed_outputs[0]['boxes'][keep]
+        return sorted_gt_indices
     
     trainer = DetrTrainer(
         model=holy_detr,
@@ -171,14 +200,14 @@ def run(model_args, data_args, training_args):
         data_collator=collate_fn,
         train_dataset=proc_datasets["train"],
         eval_dataset=proc_datasets["valid"],
-        comput_metrics=compute_metrics,
+        compute_metrics=compute_metrics,
         tokenizer=feature_extractor,
         callbacks=[transformers.EarlyStoppingCallback(early_stopping_patience=10)],
     )
 
-    # Training
-    train_results = trainer.train()
-    trainer.save_model()
+    # # Training
+    # train_results = trainer.train()
+    # trainer.save_model()
 
     # Evaluation
     metrics = trainer.evaluate(proc_datasets["valid"])
