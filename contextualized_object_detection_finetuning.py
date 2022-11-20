@@ -59,8 +59,7 @@ def run(model_args, data_args, training_args):
 
     # Data loading
     MAPPING = data_utils.load_categories()
-    scene_dset, MAPPING = data_utils.load_objects_in_scenes_dataset(mapping=MAPPING)    
-    
+
     conv_train_dset = data_utils.load_sitcom_detr_dataset(
         data_path=data_args.train_dataset_path,
         mapping=MAPPING, return_gt_labels=False
@@ -78,21 +77,28 @@ def run(model_args, data_args, training_args):
     tokenizer = transformers.AutoTokenizer.from_pretrained(model_args.text_model_name_or_path)
     feature_extractor = transformers.AutoFeatureExtractor.from_pretrained(model_args.model_name_or_path)
 
-    scene_dset = scene_dset.map(
-        data_utils.add_sitcom_detr_attr,
-        num_proc=data_args.preprocessing_num_workers,
-        desc="adding sitcom detr attribute",
-        load_from_cache_file=True,
-        remove_columns=None
-    )
-    
-    dataset = datasets.DatasetDict({
-        # 'train': datasets.concatenate_datasets([scene_dset, conv_train_dset]), 
-        'train': conv_train_dset, 
-        'valid': conv_dev_dset, 
-        'test': conv_test_dset,
-    })
-    
+    if data_args.augment_with_scene_data:
+        scene_dset, MAPPING = data_utils.load_objects_in_scenes_dataset(mapping=MAPPING)    
+        scene_dset = scene_dset.map(
+            data_utils.add_sitcom_detr_attr,
+            num_proc=data_args.preprocessing_num_workers,
+            desc="adding sitcom detr attribute",
+            load_from_cache_file=True,
+            remove_columns=None
+        )
+
+        dataset = datasets.DatasetDict({
+            'train': datasets.concatenate_datasets([scene_dset, conv_train_dset]), 
+            'valid': conv_dev_dset, 
+            'test': conv_test_dset,
+        })
+    else:
+        dataset = datasets.DatasetDict({
+            'train': conv_train_dset, 
+            'valid': conv_dev_dset, 
+            'test': conv_test_dset,
+        })
+        
     dataset = dataset.map(
         data_utils.convert_dialogue_to_caption,
         num_proc=data_args.preprocessing_num_workers,

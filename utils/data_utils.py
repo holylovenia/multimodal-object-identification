@@ -233,6 +233,7 @@ def load_image_conv_dataset(
         scene_dict = {}
 
         for scene_objects in scene['scenes']:
+            
             index_mapping = {obj['index']: local_object_id \
                 for local_object_id, obj in zip(object_map, scene_objects['objects'])}
             local_to_prefab_index_mapping = {local_object_id: obj['unique_id'] \
@@ -273,10 +274,7 @@ def load_image_conv_dataset(
             dset['dialogue'].append(dialogue)
             dset['image'].append(image_path)
             dset['bbox'].append(bbox)
-
-        # print(len(dset["dialogue"]))
             
-    # print("==", len(dset["dialogue"]))
     eval_dset = datasets.Dataset.from_dict(dset)
     eval_dset = eval_dset.cast_column("image", datasets.Image(decode=True))
     

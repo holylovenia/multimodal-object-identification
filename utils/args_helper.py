@@ -35,6 +35,9 @@ class DataArguments:
     devtest_dataset_path: str = field(
         metadata={"help": "Devtest dataset path"}
     )
+    augment_with_scene_data:  Optional[bool] = field(
+        default=False, metadata={"help": "Whether to include train dataset from scenery or not"}
+    )
     preprocessing_num_workers: Optional[int] = field(
         default=16,
         metadata={"help": "The number of processes to use for the preprocessing."},
