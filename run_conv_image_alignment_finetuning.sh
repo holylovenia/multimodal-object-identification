@@ -63,7 +63,7 @@
 #     --dataloader_num_workers=4 \
 #     --overwrite_output_dir=True
 
-CUDA_VISIBLE_DEVICES=5 python conv_image_alignment_finetuning.py \
+CUDA_VISIBLE_DEVICES=1 python conv_image_alignment_finetuning.py \
     --output_dir="./save/coref_candidates|no_mm/conv-im-align/clipper_v3" \
     --cache_dir="./cache/coref_candidates|no_mm/conv-im-align/clipper_v3" \
     --train_dataset_path="./preprocessed_data/coref_candidates|no_mm/simmc2.1_coref_candidates_dstc11_train.json" \
