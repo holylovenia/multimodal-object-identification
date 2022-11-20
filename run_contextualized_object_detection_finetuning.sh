@@ -1,4 +1,4 @@
-CUDA_VISIBLE_DEVICES=0 python3 contextualized_object_detection_finetuning.py \
+CUDA_VISIBLE_DEVICES=5 python3 contextualized_object_detection_finetuning.py \
     --output_dir="./save_holy/obj-det" --cache_dir="./cache_holy/obj-det" \
     --model_name_or_path="facebook/detr-resnet-50" --text_model_name_or_path="roberta-base" \
     --train_dataset_path='./preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_train.json' \

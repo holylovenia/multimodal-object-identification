@@ -351,7 +351,6 @@ class DetrTrainer(transformers.Trainer):
         if num_samples == 0 and observed_num_examples > 0:
             num_samples = observed_num_examples
 
-        print('len(eval_dataset)', len(eval_dataset))
         # Number of losses has been rounded to a multiple of batch_size and in a distributed training, the number of
         # samplers has been rounded to a multiple of batch_size, so we truncate.
         if all_losses is not None:

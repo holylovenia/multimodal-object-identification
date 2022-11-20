@@ -1,4 +1,5 @@
 from PIL import ImageFile
+import collections
 from copy import deepcopy
 from datasets import load_from_disk, set_caching_enabled
 from detr import CocoEvaluator
@@ -29,6 +30,7 @@ from transformers import HfArgumentParser, DataCollatorWithPadding
 from transformers.trainer_utils import get_last_checkpoint, is_main_process
 from typing import Dict, Union, Any, Optional, List, Tuple
 from model.holy_detr import HolyDetrForObjectDetection
+from simmc2.model.utils import ambiguous_candidates_evaluation as eval_utils
 
 import datasets
 import json
@@ -48,6 +50,7 @@ logger = logging.getLogger(__name__)
 #####
 # Main Functions
 #####
+is_test = False
 def run(model_args, data_args, training_args):
     training_args.output_dir="{}/{}".format(training_args.output_dir, model_args.model_name_or_path)
     os.makedirs(training_args.output_dir, exist_ok=True)
@@ -62,13 +65,13 @@ def run(model_args, data_args, training_args):
         data_path=data_args.train_dataset_path,
         mapping=MAPPING, return_gt_labels=False
     )
-    conv_dev_dset = data_utils.load_sitcom_detr_dataset(
+    conv_dev_dset, valid_gold_data = data_utils.load_sitcom_detr_dataset(
         data_path=data_args.dev_dataset_path,
-        mapping=MAPPING, return_gt_labels=False
+        mapping=MAPPING, return_gt_labels=True
     )
-    conv_test_dset = data_utils.load_sitcom_detr_dataset(
+    conv_test_dset, test_gold_data = data_utils.load_sitcom_detr_dataset(
         data_path=data_args.devtest_dataset_path,
-        mapping=MAPPING, return_gt_labels=False
+        mapping=MAPPING, return_gt_labels=True
     )
     
     # Preprocessing
@@ -76,25 +79,19 @@ def run(model_args, data_args, training_args):
     feature_extractor = transformers.AutoFeatureExtractor.from_pretrained(model_args.model_name_or_path)
 
     scene_dset = scene_dset.map(
-        data_utils.add_empty_dialogue,
+        data_utils.add_sitcom_detr_attr,
         num_proc=data_args.preprocessing_num_workers,
-        desc="adding empty dialogue",
-        load_from_cache_file=False,
+        desc="adding sitcom detr attribute",
+        load_from_cache_file=True,
         remove_columns=None
     )
     
     dataset = datasets.DatasetDict({
-        'train': datasets.concatenate_datasets([scene_dset, conv_train_dset]), 
-        'valid': conv_dev_dset, 'test': conv_test_dset
+        # 'train': datasets.concatenate_datasets([scene_dset, conv_train_dset]), 
+        'train': conv_train_dset, 
+        'valid': conv_dev_dset, 
+        'test': conv_test_dset,
     })
-        
-    dataset = dataset.map(
-        data_utils.compute_image_area,
-        num_proc=data_args.preprocessing_num_workers,
-        desc="compute image area",
-        load_from_cache_file=True,
-        remove_columns=None
-    )
     
     dataset = dataset.map(
         data_utils.convert_dialogue_to_caption,
@@ -113,9 +110,11 @@ def run(model_args, data_args, training_args):
         fn_kwargs={"tokenizer": tokenizer, "text_column_name": "caption"},
         remove_columns=["caption"]
     )
-
+    
     def transform(example_batch):
         images = [image.convert("RGB") for image in example_batch["image"]]
+        
+        # Preprocess target objects
         targets = [
             {"image_id": id_, "annotations": object_} \
             for (id_, object_) in zip(example_batch["image_id"], example_batch["objects"])
@@ -123,13 +122,29 @@ def run(model_args, data_args, training_args):
         features = feature_extractor(images=images, annotations=targets, return_tensors="pt")
         for key, value in features.items():
             example_batch[key] = value
+
+        for i, object_ in enumerate(example_batch["objects"]):
+            example_batch['labels'][i]['turn_id'] = torch.LongTensor([example_batch['turn_id'][i]])
+            example_batch['labels'][i]['dialog_id'] = torch.LongTensor([example_batch['dialog_id'][i]])
+            example_batch['labels'][i]['index'] = torch.LongTensor(list(map(lambda x: x['index'], object_)))
+            
+        # Preprocess all objects
+        all_targets = [
+            {"image_id": idx, "annotations": object_} \
+            for idx, object_ in enumerate(example_batch["all_objects"])
+        ]
+        features = feature_extractor(images=images, annotations=all_targets, return_tensors="pt")
+        for key in features['labels'][0].keys():
+            for i in range(len(features['labels'])):
+                example_batch['labels'][i][f"all_{key}"] = features['labels'][i][key]
+                
         return example_batch
     
     proc_datasets = deepcopy(dataset)
     proc_datasets["train"] = proc_datasets["train"].with_transform(transform)
     proc_datasets["valid"] = proc_datasets["valid"].with_transform(transform)
     proc_datasets["test"] = proc_datasets["test"].with_transform(transform)
-
+    
     # Training and evaluation
     text_collator = DataCollatorWithPadding(tokenizer)
     
@@ -147,6 +162,7 @@ def run(model_args, data_args, training_args):
         batch["labels"] = labels
         batch["input_ids"] = text_batch["input_ids"]
         batch["attention_mask"] = text_batch["attention_mask"]
+
         return batch
 
     text_model = transformers.AutoModel.from_pretrained(model_args.text_model_name_or_path)
@@ -171,28 +187,94 @@ def run(model_args, data_args, training_args):
         giou_cost=holy_detr.config.giou_cost
     )
     def compute_metrics(p: EvalPrediction):
+        def box_area(boxes):
+            return (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
+        
+        def box_iou(boxes1, boxes2):
+            area1 = box_area(boxes1)
+            area2 = box_area(boxes2)
+
+            left_top = torch.max(boxes1[:, None, :2], boxes2[:, :2])  # [N,M,2]
+            right_bottom = torch.min(boxes1[:, None, 2:], boxes2[:, 2:])  # [N,M,2]
+
+            width_height = (right_bottom - left_top).clamp(min=0)  # [N,M,2]
+            inter = width_height[:, :, 0] * width_height[:, :, 1]  # [N,M]
+
+            union = area1[:, None] + area2 - inter
+
+            iou = inter / union
+            return iou
+        
         # p.prediction: Dict{'pred_logits': Tensor, 'pred_boxes': Tensor}
-        # p.labels_ids: List[Dict{'class_labels': Tensor, 'pred_boxes': Tensor}]
+        # p.labels_ids: List[Dict{
+        #    'class_labels': Tensor, 'boxes': Tensor, 'image_id': Tensor, 'area': tensor,
+        #    'iscrowd': Tensor, 'orig_size': Tensor, 'size': Tensor
+        # }]
         labels = p.label_ids
         outputs = p.predictions
+        
+        all_objects = []
+        for label in labels:
+            all_object = {}
+            for k, v in label.items():
+                if 'all_' in k:
+                    all_object[k.replace('all_','')] = v
+            all_objects.append(all_object)
         
         no_obj_idx = outputs['logits'].shape[-1] # index of no object prediction
         probas = outputs['logits'].softmax(-1)
         cls_preds = probas.argmax(dim=-1)
         boxes_preds = outputs['pred_boxes']
-        indices = matcher(outputs, labels) 
         
+        match_indices = matcher(outputs, all_objects) 
+        pred_indices = []
+                
         # probas: torch.Size([414, 100, 29])
         # cls_preds: torch.Size([414, 100])
         # boxes_preds: torch.Size([414, 100, 4])
-        # labels: List[Dict{'class_labels': Tensor, 'pred_boxes': Tensor}] (len 414)
+        # labels: List[Dict{'class_labels': Tensor, 'boxes': Tensor, 'index': Tensor}] (len 414)
+        # all_objects: List[Dict{'class_labels': Tensor, 'boxes'': Tensor, 'index': Tensor}] (len 414)
         # indices: List[Tuple<pred_idxs, gt_idxs>] (len 414)
-        for prob, cls_pred, boxes_pred, label, (pred_idxs, gt_idxs) in zip(proba, cls_preds, boxes_preds, labels, indices): 
-            sorted_pred_indices = torch.tensor([p for _, p in sorted(zip(gt_indices, pred_indices))])
-            sorted_gt_indices = torch.tensor([g for g, _ in sorted(zip(gt_indices, pred_indices))])
-            pred_boxes = torch.index_select(outputs['pred_boxes'], 0, sorted_pred_indices)
+        results = collections.defaultdict(list)
+        for boxes_pred, label, all_object, (pred_idxs, gt_idxs) in zip(boxes_preds, labels, all_objects, match_indices):
+            tgt_boxes = all_object['boxes']
+            iou_scores = box_iou(boxes_pred[pred_idxs], tgt_boxes[gt_idxs]).diagonal()
+            valid_boxes = (iou_scores >= 0.5)
+            
+            turn_id = label['turn_id'].item()
+            dialog_id = label['dialog_id'].item()
+            
+            pred_obj_ids = []
+            for j in range(len(valid_boxes)):
+                # nz = multihot_batch.nonzero()
+                # nz[nz[:,0] == 0,1]
+                if valid_boxes[j]:
+                    pred_obj_ids.append(all_objects[gt_idxs[j]]['index'])
+            
+            new_instance = {
+                "turn_id": turn_id,
+                "disambiguation_candidates": pred_obj_ids
+            }
+            results[dialog_id].append(new_instance)
 
-        return sorted_gt_indices
+        # Restructure results JSON and save.
+        print('Compariong predictions with ground truths...')
+        results = [{
+            "dialog_id": dialog_id,
+            "predictions": predictions,
+        } for dialog_id, predictions in results.items()]
+
+        global is_test
+        gold_data = test_gold_data if is_test else valid_gold_data
+        metrics = eval_utils.evaluate_ambiguous_candidates(gold_data, results)
+
+        print('== Eval Metrics ==')
+        print('Recall: ', metrics["recall"])
+        print('Precision: ', metrics["precision"])
+        print('F1-Score: ', metrics["f1"])
+
+        return metrics
+
     
     trainer = DetrTrainer(
         model=holy_detr,
@@ -205,15 +287,18 @@ def run(model_args, data_args, training_args):
         callbacks=[transformers.EarlyStoppingCallback(early_stopping_patience=10)],
     )
 
-    # # Training
-    # train_results = trainer.train()
-    # trainer.save_model()
+    # Training
+    train_results = trainer.train()
+    trainer.save_model()
 
     # Evaluation
     metrics = trainer.evaluate(proc_datasets["valid"])
     trainer.log_metrics("eval", metrics)
     trainer.save_metrics("eval", metrics)
 
+    global is_test
+    is_test = True # Nasty Global Variable for Compute Metric
+    
     metrics = trainer.evaluate(proc_datasets["test"])
     trainer.log_metrics("test", metrics)
     trainer.save_metrics("test", metrics)

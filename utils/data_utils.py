@@ -373,9 +373,23 @@ def convert_dialogue_to_caption(example_batch, num_utterances=3, utterance_turn=
     example_batch['caption'] = (" ".join(utterances[-num_utterances:])).lower()
     return example_batch
 
-def add_empty_dialogue(example_batch):
+def add_sitcom_detr_attr(example_batch):
+    for object_ in example_batch['objects']:
+        if 'dialog_id' not in object_:
+            object_['dialog_id'] = 0
+        if 'turn_id' not in object_:
+            object_['turn_id'] = 0
+        if 'index' not in object_:
+            object_['index'] = 0
+        
     if 'dialogue' not in example_batch:
         example_batch['dialogue'] = ['' for i in range(10)]
+    if 'all_objects' not in example_batch:
+        example_batch['all_objects'] = example_batch['objects']
+        
+    return example_batch
+
+def add_turn_dialog_id(example_batch):
     return example_batch
 
 def tokenize_text(example_batch, tokenizer, text_column_name='caption'):
@@ -407,12 +421,14 @@ def load_sitcom_detr_dataset(
 
     dset = {
         # 'dialog_id': [], 'scene_id': [], 'turn_id': [], 
-        'image': [], 'image_id': [], 'objects': [], 'dialogue': []
+        'image': [], 'image_id': [], 'objects': [], 'dialogue': [],
+        'turn_id': [], 'dialog_id': [], 'all_objects': []
     }
+
     for i, row in enumerate(data):
         # Dialogue idx to labels
-        dialog_id = row['dialog_id']
-        turn_id = row['turn_id']
+        dialog_id = int(row['dialog_id'])
+        turn_id = int(row['turn_id'])
         labels = row['ambiguous_candidates']
         object_map = row['object_map']
         # Scene
@@ -425,29 +441,33 @@ def load_sitcom_detr_dataset(
 
         scene = json.load(open(scene_path, 'r'))
         scene_dict = {}
-        for scene_objects in scene['scenes']:
-            index_mapping = {}
-            for obj_id, obj in zip(object_map, scene_objects['objects']):
-                index_mapping[obj['index']] = obj_id
+        
+        assert len(scene['scenes']) == 1 # Ensure there is only 1 scene
+        scene_objects = scene['scenes'][0] 
+        
+        index_mapping = {}
+        for obj_id, obj in zip(object_map, scene_objects['objects']):
+            index_mapping[obj['index']] = obj_id
 
-            objects = []
-            for scene_object in scene_objects['objects']:
-                if index_mapping[scene_object['index']] not in labels:
-                    continue
-
-                object_annotation = {
-                    "bbox": [float(b) for b in scene_object["bbox"]],
-                    "id": scene_object["unique_id"],
-                    "area": None,
-                    "segmentation": [],
-                    "iscrowd": False,
-                }
-                if fashion_prefab.get(scene_object["prefab_path"]) is not None:
-                    item = fashion_prefab[scene_object["prefab_path"]]
-                else:
-                    item = furniture_prefab[scene_object["prefab_path"]]
-                object_annotation["category_id"] = mapping["cat2id"][item["type"]]
+        all_objects = []
+        objects = []
+        for scene_object in scene_objects['objects']:
+            object_annotation = {
+                "bbox": [float(b) for b in scene_object["bbox"]],
+                "id": scene_object["unique_id"],
+                "index": index_mapping[scene_object['index']],
+                "area": None,
+                "segmentation": [],
+                "iscrowd": False,
+            }
+            if fashion_prefab.get(scene_object["prefab_path"]) is not None:
+                item = fashion_prefab[scene_object["prefab_path"]]
+            else:
+                item = furniture_prefab[scene_object["prefab_path"]]
+            object_annotation["category_id"] = mapping["cat2id"][item["type"]]
+            if index_mapping[scene_object['index']] in labels:
                 objects.append(object_annotation)
+            all_objects.append(object_annotation)
 
         dialogue = row["input_text"]
         image_path = row['image_name']
@@ -456,13 +476,14 @@ def load_sitcom_detr_dataset(
                 image_path = f'{img_dir_path}/{image_path}'
                 break
 
-        # dset['dialog_id'].append(dialog_id)
         # dset['scene_id'].append(scene_id)
-        # dset['turn_id'].append(turn_id)
+        dset['dialog_id'].append(dialog_id)
+        dset['turn_id'].append(turn_id)
         dset['image'].append(image_path)
         dset['image_id'].append(i)
         dset['objects'].append(objects)
-        dset['dialogue'].append(dialogue)
+        dset['dialogue'].append(dialogue)        
+        dset['all_objects'].append(all_objects)
 
     dset = datasets.Dataset.from_dict(dset)
     dset = dset.cast_column("image", datasets.Image(decode=True))
