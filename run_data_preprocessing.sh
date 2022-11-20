@@ -12,7 +12,8 @@ DATA_FOLDER="/home/holy/datasets/simmc2.1/"
 # 	--simmc_dev_json "/home/holy/datasets/simmc2.1/simmc2.1_dials_dstc11_dev.json" \
 # 	--simmc_devtest_json "/home/holy/datasets/simmc2.1/simmc2.1_dials_dstc11_devtest.json" \
 # 	--scene_json_folder "/home/holy/datasets/simmc2.1/public/" \
-# 	--coref_candidates_save_path "./preprocessed_data/coref_candidates/"
+# 	--coref_candidates_save_path "./preprocessed_data/coref_candidates|no_mm/"
 
 cd simmc2/model/mm_dst
-./run_preprocess_gpt2.sh /home/holy/projects/ambiguous-mm-dialogue/preprocessed_data/mm_dst|no_mm /home/holy/datasets/simmc2.1
+./run_preprocess_gpt2.sh "/home/holy/projects/ambiguous-mm-dialogue/preprocessed_data/coref_candidates|no_mm" /home/holy/datasets/simmc2.1
+# ./run_preprocess_gpt2.sh "/home/holy/projects/ambiguous-mm-dialogue/preprocessed_data/coref_candidates|mm" /home/holy/datasets/simmc2.1

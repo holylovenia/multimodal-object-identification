@@ -84,6 +84,12 @@ def run(model_args, data_args, training_args):
         
         # Preprocessing
         tokenizer = transformers.AutoTokenizer.from_pretrained(model_args.model_name_or_path)
+        if data_args.additional_special_token_path is not None and os.path.isfile(data_args.additional_special_token_path):
+            with open(data_args.additional_special_token_path, "rb") as handle:
+                special_tokens_dict = json.load(handle)
+                num_added_toks = tokenizer.add_special_tokens(special_tokens_dict)
+            logger.info(f"Added {num_added_toks} tokens")
+            logger.info(f"All special tokens: {tokenizer.all_special_tokens}")
         feature_extractor = transformers.AutoFeatureExtractor.from_pretrained(model_args.model_name_or_path)
         processor = transformers.CLIPProcessor(feature_extractor, tokenizer)
 
@@ -200,7 +206,7 @@ def run(model_args, data_args, training_args):
             # indexes = range(len(logits))
 
             # ORACLE
-            indexes = np.argpartition(logits, -num_labels)[-num_labels:]
+            indexes = np.argpartition(logits, -num_labels)[-num_labels:] if num_labels != 0 else []
 
             # Top-k
             # indexes = np.argpartition(logits, -min(len(logits), 15))[-min(len(logits), 15):]
@@ -221,7 +227,7 @@ def run(model_args, data_args, training_args):
             results[dialog_id].append(new_instance)
 
         # Restructure results JSON and save.
-        print('Compariong predictions with ground truths...')
+        print('Comparing predictions with ground truths...')
         results = [{
             "dialog_id": dialog_id,
             "predictions": predictions,
@@ -231,7 +237,10 @@ def run(model_args, data_args, training_args):
         # print()
         # print("gold_data", gold_data["dialogue_data"][0])
         # print()
-        metrics = eval_utils.evaluate_ambiguous_candidates(gold_data, results)
+        if "coref_candidates" in data_args.devtest_dataset_path:
+            metrics = eval_utils.evaluate_ambiguous_candidates(gold_data, results, is_actually_coref=True)
+        else:
+            metrics = eval_utils.evaluate_ambiguous_candidates(gold_data, results, is_actually_coref=False)
 
         print('== Eval Metrics ==')
         print('Recall: ', metrics["recall"])
