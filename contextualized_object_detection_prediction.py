@@ -50,7 +50,8 @@ logger = logging.getLogger(__name__)
 #####
 # Main Functions
 #####
-global is_test = False
+global split_name 
+split_name = 'traing'
 
 def run(model_args, data_args, training_args):
     training_args.output_dir="{}/{}".format(training_args.output_dir, model_args.model_name_or_path)
@@ -61,9 +62,9 @@ def run(model_args, data_args, training_args):
     # Data loading
     MAPPING = data_utils.load_categories()
 
-    conv_train_dset = data_utils.load_sitcom_detr_dataset(
+    conv_train_dset, train_gold_data = data_utils.load_sitcom_detr_dataset(
         data_path=data_args.train_dataset_path,
-        mapping=MAPPING, return_gt_labels=False
+        mapping=MAPPING, return_gt_labels=True
     )
     conv_dev_dset, valid_gold_data = data_utils.load_sitcom_detr_dataset(
         data_path=data_args.dev_dataset_path,
@@ -144,7 +145,10 @@ def run(model_args, data_args, training_args):
         for key in features['labels'][0].keys():
             for i in range(len(features['labels'])):
                 example_batch['labels'][i][f"all_{key}"] = features['labels'][i][key]
-                
+
+        for i, object_ in enumerate(example_batch["all_objects"]):
+            example_batch['labels'][i]['all_index'] = torch.LongTensor(list(map(lambda x: x['index'], object_)))
+            
         return example_batch
     
     proc_datasets = deepcopy(dataset)
@@ -178,22 +182,30 @@ def run(model_args, data_args, training_args):
         id2label=MAPPING["id2cat"],
         label2id=MAPPING["cat2id"],
     )
-    detr_model = transformers.AutoModelForObjectDetection.from_pretrained(
-        model_args.model_name_or_path,
-        id2label=MAPPING["id2cat"],
-        label2id=MAPPING["cat2id"],
-        ignore_mismatched_sizes=True
-    )
+    # detr_model = transformers.AutoModelForObjectDetection.from_pretrained(
+    #     model_args.model_name_or_path,
+    #     id2label=MAPPING["id2cat"],
+    #     label2id=MAPPING["cat2id"],
+    #     ignore_mismatched_sizes=True
+    # )
     config.text_auxiliary_loss = False
     holy_detr = HolyDetrForObjectDetection(config, text_model)
-    holy_detr.load_state_dict(detr_model.state_dict(), strict=False)
+    # holy_detr.load_state_dict(detr_model.state_dict(), strict=False)
+    holy_detr.load_state_dict(torch.load(f'{model_args.checkpoint_path}/pytorch_model.bin'), strict=True)
     
     matcher = DetrHungarianMatcher(
         class_cost=holy_detr.config.class_cost, 
         bbox_cost=holy_detr.config.bbox_cost, 
         giou_cost=holy_detr.config.giou_cost
     )
+    
+    @torch.inference_mode()
     def compute_metrics(p: EvalPrediction):
+        def center_to_corners_format(x):
+            x_c, y_c, w, h = x.unbind(-1)
+            b = [(x_c - 0.5 * w), (y_c - 0.5 * h), (x_c + 0.5 * w), (y_c + 0.5 * h)]
+            return torch.stack(b, dim=-1)
+
         def box_area(boxes):
             return (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
         
@@ -208,7 +220,6 @@ def run(model_args, data_args, training_args):
             inter = width_height[:, :, 0] * width_height[:, :, 1]  # [N,M]
 
             union = area1[:, None] + area2 - inter
-
             iou = inter / union
             return iou
         
@@ -233,9 +244,18 @@ def run(model_args, data_args, training_args):
         cls_preds = probas.argmax(dim=-1)
         boxes_preds = outputs['pred_boxes']
         
-        match_indices = matcher(outputs, all_objects) 
-        pred_indices = []
-                
+        match_indices = []
+        batch_size = 128
+        for i in range(0, len(all_objects), 128):
+            s_idx = i
+            e_idx = i + batch_size if i + batch_size < len(all_objects) else len(all_objects)
+            batch_outputs = {
+                'logits': outputs['logits'][s_idx:e_idx],
+                'pred_boxes': outputs['pred_boxes'][s_idx:e_idx]
+            }
+            batch_targets = all_objects[s_idx:e_idx]
+            match_indices += matcher(batch_outputs, batch_targets)
+
         # probas: torch.Size([414, 100, 29])
         # cls_preds: torch.Size([414, 100])
         # boxes_preds: torch.Size([414, 100, 4])
@@ -245,18 +265,28 @@ def run(model_args, data_args, training_args):
         results = collections.defaultdict(list)
         for boxes_pred, label, all_object, (pred_idxs, gt_idxs) in zip(boxes_preds, labels, all_objects, match_indices):
             tgt_boxes = all_object['boxes']
-            iou_scores = box_iou(boxes_pred[pred_idxs], tgt_boxes[gt_idxs]).diagonal()
-            valid_boxes = (iou_scores >= 0.5)
+
+            # iou_scores = box_iou(boxes_pred[pred_idxs], tgt_boxes[gt_idxs])
+            iou_scores = box_iou(
+                center_to_corners_format(boxes_pred[pred_idxs]),
+                center_to_corners_format(tgt_boxes[gt_idxs])
+            ).diagonal()
+            valid_boxes = (iou_scores >= 0.1)
+            print('valid_boxes')
+            print(valid_boxes.shape)
+            print(valid_boxes)
             
             turn_id = label['turn_id'].item()
             dialog_id = label['dialog_id'].item()
             
+            # print('gt_idxs', gt_idxs)
+            # print('iou_scores', iou_scores)
+            # print('indices', all_object['index'])
+            
             pred_obj_ids = []
             for j in range(len(valid_boxes)):
-                # nz = multihot_batch.nonzero()
-                # nz[nz[:,0] == 0,1]
                 if valid_boxes[j]:
-                    pred_obj_ids.append(all_objects[gt_idxs[j]]['index'])
+                    pred_obj_ids.append(all_object['index'][gt_idxs[j]].item())
             
             new_instance = {
                 "turn_id": turn_id,
@@ -271,8 +301,15 @@ def run(model_args, data_args, training_args):
             "predictions": predictions,
         } for dialog_id, predictions in results.items()]
 
-        global is_test
-        gold_data = test_gold_data if is_test else valid_gold_data
+        global split_name
+        if split_name == 'train':
+            gold_data = train_gold_data
+        elif split_name == 'valid': 
+            gold_data = valid_gold_data
+        elif split_name == 'test':
+            gold_data = test_gold_data 
+        else:
+            raise ValueError(f'Unknown split name `{split_name}`')
         metrics = eval_utils.evaluate_ambiguous_candidates(gold_data, results)
 
         print('== Eval Metrics ==')
@@ -282,30 +319,39 @@ def run(model_args, data_args, training_args):
 
         return metrics
 
-    
     trainer = DetrTrainer(
         model=holy_detr,
         args=training_args,
         data_collator=collate_fn,
         train_dataset=proc_datasets["train"],
         eval_dataset=proc_datasets["valid"],
-        compute_metrics=compute_metrics,
+        # compute_metrics=compute_metrics, # Not sure why it doesn't work
         tokenizer=feature_extractor,
         callbacks=[transformers.EarlyStoppingCallback(early_stopping_patience=10)],
     )
 
-    # Training
-    train_results = trainer.train()
-    trainer.save_model()
+    # # Training
+    # train_results = trainer.train()
+    # trainer.save_model()
 
     # Evaluation
-    metrics = trainer.evaluate(proc_datasets["valid"])
-    trainer.log_metrics("eval", metrics)
-    trainer.save_metrics("eval", metrics)
-
-    global is_test
-    is_test = True # Nasty Global Variable for Compute Metric
+    trainer.compute_metrics = compute_metrics
     
+    global split_name
+    print('Running evaluation on the training data')
+    split_name = "train"
+    metrics = trainer.evaluate(proc_datasets["train"])
+    trainer.log_metrics("train", metrics)
+    trainer.save_metrics("train", metrics)
+    
+    print('Running evaluation on the validation data')
+    split_name = "valid"
+    metrics = trainer.evaluate(proc_datasets["valid"])
+    trainer.log_metrics("valid", metrics)
+    trainer.save_metrics("valid", metrics)
+
+    print('Running evaluation on the testing data')
+    split_name = "test"
     metrics = trainer.evaluate(proc_datasets["test"])
     trainer.log_metrics("test", metrics)
     trainer.save_metrics("test", metrics)

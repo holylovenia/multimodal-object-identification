@@ -223,6 +223,7 @@ class DetrTrainer(transformers.Trainer):
 
         # losses/preds/labels on CPU (final containers)
         all_losses = None
+        all_preds = None
         all_pred_logits = None
         all_pred_boxes = None
         all_labels = None
@@ -366,14 +367,16 @@ class DetrTrainer(transformers.Trainer):
             all_inputs = nested_truncate(all_inputs, num_samples)
 
         # Metrics!
-        if self.compute_metrics is not None \
-            and all_pred_logits is not None \
-            and all_pred_boxes is not None \
-            and all_labels is not None:
+        if all_pred_boxes is not None \
+            and all_pred_boxes is not None:
             all_preds = {
                 'logits': torch.from_numpy(all_pred_logits).float(),
                 'pred_boxes': torch.from_numpy(all_pred_boxes).float()
             }
+            
+        if self.compute_metrics is not None \
+            and all_preds is not None \
+            and all_labels is not None:
             if args.include_inputs_for_metrics:
                 metrics = self.compute_metrics(
                     EvalPrediction(predictions=all_preds, label_ids=all_labels, inputs=all_inputs)

@@ -375,13 +375,13 @@ def convert_dialogue_to_caption(example_batch, num_utterances=3, utterance_turn=
 
 def add_sitcom_detr_attr(example_batch):
     for object_ in example_batch['objects']:
-        if 'dialog_id' not in object_:
-            object_['dialog_id'] = 0
-        if 'turn_id' not in object_:
-            object_['turn_id'] = 0
         if 'index' not in object_:
             object_['index'] = 0
         
+    if 'dialog_id' not in example_batch:
+        example_batch['dialog_id'] = 0
+    if 'turn_id' not in example_batch:
+        example_batch['turn_id'] = 0
     if 'dialogue' not in example_batch:
         example_batch['dialogue'] = ['' for i in range(10)]
     if 'all_objects' not in example_batch:

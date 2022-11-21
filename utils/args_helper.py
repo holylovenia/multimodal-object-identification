@@ -12,7 +12,10 @@ class ModelArguments:
     )    
     text_model_name_or_path: Optional[str] = field(
         default="roberta-base", metadata={"help": "The path of the HuggingFace text model for SitCoM-DETR."}
-    )    
+    )   
+    checkpoint_path: Optional[str] = field(
+        default=None, metadata={"help": "The path of the checkpoint of SitCoM-DETR."}
+    )
     include_other_similar_objects: Optional[bool] = field(
         default=False, metadata={"help": "Whether to include other similar objects or not"}
     )
