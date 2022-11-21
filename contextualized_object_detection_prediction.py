@@ -62,6 +62,15 @@ def run(model_args, data_args, training_args):
     # Data loading
     MAPPING = data_utils.load_categories()
 
+    scene_dset, MAPPING = data_utils.load_objects_in_scenes_dataset(mapping=MAPPING)    
+    scene_dset = scene_dset.map(
+        data_utils.add_sitcom_detr_attr,
+        num_proc=data_args.preprocessing_num_workers,
+        desc="adding sitcom detr attribute",
+        load_from_cache_file=False,
+        remove_columns=None
+    )
+    
     conv_train_dset, train_gold_data = data_utils.load_sitcom_detr_dataset(
         data_path=data_args.train_dataset_path,
         mapping=MAPPING, return_gt_labels=True
@@ -79,27 +88,12 @@ def run(model_args, data_args, training_args):
     tokenizer = transformers.AutoTokenizer.from_pretrained(model_args.text_model_name_or_path)
     feature_extractor = transformers.AutoFeatureExtractor.from_pretrained(model_args.model_name_or_path)
 
-    if data_args.augment_with_scene_data:
-        scene_dset, MAPPING = data_utils.load_objects_in_scenes_dataset(mapping=MAPPING)    
-        scene_dset = scene_dset.map(
-            data_utils.add_sitcom_detr_attr,
-            num_proc=data_args.preprocessing_num_workers,
-            desc="adding sitcom detr attribute",
-            load_from_cache_file=False,
-            remove_columns=None
-        )
-
-        dataset = datasets.DatasetDict({
-            'train': datasets.concatenate_datasets([scene_dset, conv_train_dset]), 
-            'valid': conv_dev_dset, 
-            'test': conv_test_dset,
-        })
-    else:
-        dataset = datasets.DatasetDict({
-            'train': conv_train_dset, 
-            'valid': conv_dev_dset, 
-            'test': conv_test_dset,
-        })
+    dataset = datasets.DatasetDict({
+        'scene': scene_dset,
+        'train': conv_train_dset, 
+        'valid': conv_dev_dset, 
+        'test': conv_test_dset,
+    })
         
     dataset = dataset.map(
         data_utils.convert_dialogue_to_caption,
@@ -262,60 +256,58 @@ def run(model_args, data_args, training_args):
         # labels: List[Dict{'class_labels': Tensor, 'boxes': Tensor, 'index': Tensor}] (len 414)
         # all_objects: List[Dict{'class_labels': Tensor, 'boxes'': Tensor, 'index': Tensor}] (len 414)
         # indices: List[Tuple<pred_idxs, gt_idxs>] (len 414)
-        results = collections.defaultdict(list)
-        for boxes_pred, label, all_object, (pred_idxs, gt_idxs) in zip(boxes_preds, labels, all_objects, match_indices):
-            tgt_boxes = all_object['boxes']
+        for threshold in [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]:
+            results = collections.defaultdict(list)
+            for boxes_pred, label, all_object, (pred_idxs, gt_idxs) in zip(boxes_preds, labels, all_objects, match_indices):
+                tgt_boxes = all_object['boxes']
 
-            # iou_scores = box_iou(boxes_pred[pred_idxs], tgt_boxes[gt_idxs])
-            iou_scores = box_iou(
-                center_to_corners_format(boxes_pred[pred_idxs]),
-                center_to_corners_format(tgt_boxes[gt_idxs])
-            ).diagonal()
-            valid_boxes = (iou_scores >= 0.1)
-            print('valid_boxes')
-            print(valid_boxes.shape)
-            print(valid_boxes)
-            
-            turn_id = label['turn_id'].item()
-            dialog_id = label['dialog_id'].item()
-            
-            # print('gt_idxs', gt_idxs)
-            # print('iou_scores', iou_scores)
-            # print('indices', all_object['index'])
-            
-            pred_obj_ids = []
-            for j in range(len(valid_boxes)):
-                if valid_boxes[j]:
-                    pred_obj_ids.append(all_object['index'][gt_idxs[j]].item())
-            
-            new_instance = {
-                "turn_id": turn_id,
-                "disambiguation_candidates": pred_obj_ids
-            }
-            results[dialog_id].append(new_instance)
+                # iou_scores = box_iou(boxes_pred[pred_idxs], tgt_boxes[gt_idxs])
+                iou_scores = box_iou(
+                    center_to_corners_format(boxes_pred[pred_idxs]),
+                    center_to_corners_format(tgt_boxes[gt_idxs])
+                ).diagonal()
+                valid_boxes = (iou_scores >= threshold)
 
-        # Restructure results JSON and save.
-        print('Compariong predictions with ground truths...')
-        results = [{
-            "dialog_id": dialog_id,
-            "predictions": predictions,
-        } for dialog_id, predictions in results.items()]
+                turn_id = label['turn_id'].item()
+                dialog_id = label['dialog_id'].item()
 
-        global split_name
-        if split_name == 'train':
-            gold_data = train_gold_data
-        elif split_name == 'valid': 
-            gold_data = valid_gold_data
-        elif split_name == 'test':
-            gold_data = test_gold_data 
-        else:
-            raise ValueError(f'Unknown split name `{split_name}`')
-        metrics = eval_utils.evaluate_ambiguous_candidates(gold_data, results)
+                # print('gt_idxs', gt_idxs)
+                # print('iou_scores', iou_scores)
+                # print('indices', all_object['index'])
 
-        print('== Eval Metrics ==')
-        print('Recall: ', metrics["recall"])
-        print('Precision: ', metrics["precision"])
-        print('F1-Score: ', metrics["f1"])
+                pred_obj_ids = []
+                for j in range(len(valid_boxes)):
+                    if valid_boxes[j]:
+                        pred_obj_ids.append(all_object['index'][gt_idxs[j]].item())
+
+                new_instance = {
+                    "turn_id": turn_id,
+                    "disambiguation_candidates": pred_obj_ids
+                }
+                results[dialog_id].append(new_instance)
+
+            # Restructure results JSON and save.
+            print('Compariong predictions with ground truths...')
+            results = [{
+                "dialog_id": dialog_id,
+                "predictions": predictions,
+            } for dialog_id, predictions in results.items()]
+
+            global split_name
+            if split_name == 'train':
+                gold_data = train_gold_data
+            elif split_name == 'valid': 
+                gold_data = valid_gold_data
+            elif split_name == 'test':
+                gold_data = test_gold_data 
+            else:
+                raise ValueError(f'Unknown split name `{split_name}`')
+            metrics = eval_utils.evaluate_ambiguous_candidates(gold_data, results)
+
+            print(f'== Eval Metrics T={threshold} ==')
+            print('Recall: ', metrics["recall"])
+            print('Precision: ', metrics["precision"])
+            print('F1-Score: ', metrics["f1"])
 
         return metrics
 
@@ -338,17 +330,17 @@ def run(model_args, data_args, training_args):
     trainer.compute_metrics = compute_metrics
     
     global split_name
-    print('Running evaluation on the training data')
-    split_name = "train"
-    metrics = trainer.evaluate(proc_datasets["train"])
-    trainer.log_metrics("train", metrics)
-    trainer.save_metrics("train", metrics)
+#     print('Running evaluation on the training data')
+#     split_name = "train"
+#     metrics = trainer.evaluate(proc_datasets["train"])
+#     trainer.log_metrics("train", metrics)
+#     trainer.save_metrics("train", metrics)
     
-    print('Running evaluation on the validation data')
-    split_name = "valid"
-    metrics = trainer.evaluate(proc_datasets["valid"])
-    trainer.log_metrics("valid", metrics)
-    trainer.save_metrics("valid", metrics)
+#     print('Running evaluation on the validation data')
+#     split_name = "valid"
+#     metrics = trainer.evaluate(proc_datasets["valid"])
+#     trainer.log_metrics("valid", metrics)
+#     trainer.save_metrics("valid", metrics)
 
     print('Running evaluation on the testing data')
     split_name = "test"

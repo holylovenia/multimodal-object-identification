@@ -50,7 +50,7 @@ logger = logging.getLogger(__name__)
 #####
 # Main Functions
 #####
-global is_test = False
+global split_name = 'valid'
 
 def run(model_args, data_args, training_args):
     training_args.output_dir="{}/{}".format(training_args.output_dir, model_args.model_name_or_path)
@@ -61,9 +61,9 @@ def run(model_args, data_args, training_args):
     # Data loading
     MAPPING = data_utils.load_categories()
 
-    conv_train_dset = data_utils.load_sitcom_detr_dataset(
+    conv_train_dset, train_fold_data = data_utils.load_sitcom_detr_dataset(
         data_path=data_args.train_dataset_path,
-        mapping=MAPPING, return_gt_labels=False
+        mapping=MAPPING, return_gt_labels=True
     )
     conv_dev_dset, valid_gold_data = data_utils.load_sitcom_detr_dataset(
         data_path=data_args.dev_dataset_path,
@@ -144,7 +144,10 @@ def run(model_args, data_args, training_args):
         for key in features['labels'][0].keys():
             for i in range(len(features['labels'])):
                 example_batch['labels'][i][f"all_{key}"] = features['labels'][i][key]
-                
+
+        for i, object_ in enumerate(example_batch["all_objects"]):
+            example_batch['labels'][i]['all_index'] = torch.LongTensor(list(map(lambda x: x['index'], object_)))
+            
         return example_batch
     
     proc_datasets = deepcopy(dataset)
@@ -193,7 +196,14 @@ def run(model_args, data_args, training_args):
         bbox_cost=holy_detr.config.bbox_cost, 
         giou_cost=holy_detr.config.giou_cost
     )
+    
+    @torch.inference_mode()
     def compute_metrics(p: EvalPrediction):
+        def center_to_corners_format(x):
+            x_c, y_c, w, h = x.unbind(-1)
+            b = [(x_c - 0.5 * w), (y_c - 0.5 * h), (x_c + 0.5 * w), (y_c + 0.5 * h)]
+            return torch.stack(b, dim=-1)
+
         def box_area(boxes):
             return (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
         
@@ -208,7 +218,6 @@ def run(model_args, data_args, training_args):
             inter = width_height[:, :, 0] * width_height[:, :, 1]  # [N,M]
 
             union = area1[:, None] + area2 - inter
-
             iou = inter / union
             return iou
         
@@ -233,9 +242,18 @@ def run(model_args, data_args, training_args):
         cls_preds = probas.argmax(dim=-1)
         boxes_preds = outputs['pred_boxes']
         
-        match_indices = matcher(outputs, all_objects) 
-        pred_indices = []
-                
+        match_indices = []
+        batch_size = 128
+        for i in range(0, len(all_objects), 128):
+            s_idx = i
+            e_idx = i + batch_size if i + batch_size < len(all_objects) else len(all_objects)
+            batch_outputs = {
+                'logits': outputs['logits'][s_idx:e_idx],
+                'pred_boxes': outputs['pred_boxes'][s_idx:e_idx]
+            }
+            batch_targets = all_objects[s_idx:e_idx]
+            match_indices += matcher(batch_outputs, batch_targets)
+
         # probas: torch.Size([414, 100, 29])
         # cls_preds: torch.Size([414, 100])
         # boxes_preds: torch.Size([414, 100, 4])
@@ -245,19 +263,26 @@ def run(model_args, data_args, training_args):
         results = collections.defaultdict(list)
         for boxes_pred, label, all_object, (pred_idxs, gt_idxs) in zip(boxes_preds, labels, all_objects, match_indices):
             tgt_boxes = all_object['boxes']
-            iou_scores = box_iou(boxes_pred[pred_idxs], tgt_boxes[gt_idxs]).diagonal()
-            valid_boxes = (iou_scores >= 0.5)
-            
+
+            # iou_scores = box_iou(boxes_pred[pred_idxs], tgt_boxes[gt_idxs])
+            iou_scores = box_iou(
+                center_to_corners_format(boxes_pred[pred_idxs]),
+                center_to_corners_format(tgt_boxes[gt_idxs])
+            ).diagonal()
+            valid_boxes = (iou_scores >= 0.1)
+
             turn_id = label['turn_id'].item()
             dialog_id = label['dialog_id'].item()
-            
+
+            # print('gt_idxs', gt_idxs)
+            # print('iou_scores', iou_scores)
+            # print('indices', all_object['index'])
+
             pred_obj_ids = []
             for j in range(len(valid_boxes)):
-                # nz = multihot_batch.nonzero()
-                # nz[nz[:,0] == 0,1]
                 if valid_boxes[j]:
-                    pred_obj_ids.append(all_objects[gt_idxs[j]]['index'])
-            
+                    pred_obj_ids.append(all_object['index'][gt_idxs[j]].item())
+
             new_instance = {
                 "turn_id": turn_id,
                 "disambiguation_candidates": pred_obj_ids
@@ -271,17 +296,23 @@ def run(model_args, data_args, training_args):
             "predictions": predictions,
         } for dialog_id, predictions in results.items()]
 
-        global is_test
-        gold_data = test_gold_data if is_test else valid_gold_data
+        global split_name
+        if split_name == 'train':
+            gold_data = train_gold_data
+        elif split_name == 'valid': 
+            gold_data = valid_gold_data
+        elif split_name == 'test':
+            gold_data = test_gold_data 
+        else:
+            raise ValueError(f'Unknown split name `{split_name}`')
         metrics = eval_utils.evaluate_ambiguous_candidates(gold_data, results)
 
-        print('== Eval Metrics ==')
+        print(f'== Eval Metrics ==')
         print('Recall: ', metrics["recall"])
         print('Precision: ', metrics["precision"])
         print('F1-Score: ', metrics["f1"])
 
         return metrics
-
     
     trainer = DetrTrainer(
         model=holy_detr,
@@ -303,22 +334,12 @@ def run(model_args, data_args, training_args):
     trainer.log_metrics("eval", metrics)
     trainer.save_metrics("eval", metrics)
 
-    global is_test
-    is_test = True # Nasty Global Variable for Compute Metric
+    global split_name
+    split_name = 'test' # Nasty Global Variable for Compute Metric
     
     metrics = trainer.evaluate(proc_datasets["test"])
     trainer.log_metrics("test", metrics)
     trainer.save_metrics("test", metrics)
-    
-    # # Prediction
-    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    # for idx, batch in enumerate(tqdm(proc_datasets["all"])):
-    #     # forward pass
-    #     outputs = model(
-    #         pixel_values=batch["pixel_values"].unsqueeze(dim=0).to(device),
-    #         pixel_mask=batch["pixel_mask"].unsqueeze(dim=0).to(device))
-    #     print(outputs.pred_boxes.shape, outputs.last_hidden_state)
-
 
 def main():
     ###
