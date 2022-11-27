@@ -147,7 +147,7 @@ def run(model_args, data_args, training_args):
         ], dim=1)
     if not os.path.exists(data_args.preprocessed_data_dir):
         os.makedirs(data_args.preprocessed_data_dir)
-    visual_features_path = os.path.join(data_args.preprocessed_data_dir, "visual_features_detr.pt")
+    visual_features_path = os.path.join(data_args.preprocessed_data_dir, "visual_features_detr_no_bbox.pt")
     torch.save(pred_results, visual_features_path)
     print(f"Saved to {visual_features_path}.")
     # results = trainer.predict(proc_datasets["all"])

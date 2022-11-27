@@ -1,0 +1,12 @@
+CUDA_VISIBLE_DEVICES=3 python3 mdetr_zero_shot.py \
+    --output_dir="./results/obj-det/mdetr" --cache_dir="./cache/obj-det/mdetr" \
+    --train_dataset_path='./preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_train.json' \
+    --dev_dataset_path='./preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_dev.json' \
+    --devtest_dataset_path='./preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_devtest.json' \
+    --per_device_train_batch_size=1 --per_device_eval_batch_size=1 --num_train_epochs=200 --fp16=True \
+    --save_strategy="epoch" --save_steps=1 --save_total_limit=1 --load_best_model_at_end=True \
+    --logging_strategy="epoch" --logging_steps=1 --report_to="tensorboard" \
+    --evaluation_strategy="epoch" --eval_steps=1 --eval_accumulation_steps=1 \
+    --seed=42 --dataloader_num_workers=4 \
+    --gradient_accumulation_steps=1 --remove_unused_columns=False \
+    --overwrite_output_dir=True

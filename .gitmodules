@@ -4,3 +4,6 @@
 [submodule "detr"]
 	path = detr
 	url = https://github.com/holylovenia/detr.git
+[submodule "mdetr"]
+	path = mdetr
+	url = https://github.com/holylovenia/mdetr.git
