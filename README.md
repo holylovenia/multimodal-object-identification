@@ -1,4 +1,12 @@
-# Multimodal Object Identification in Situated Dialogue
+# Which One Are You Referring To? Multimodal Object Identification in Situated Dialogue
+
+Holy Lovenia, Samuel Cahyawijaya
+
+-----
+
+## Abstract
+
+The demand for multimodal dialogue system has been rising in various domains, emphasizing the importance of interpreting multimodal inputs from conversational and situational context. One main challenge in multimodal dialogue understanding is multimodal object identification, which constitutes the ability to identify objects relevant to a multimodal user-system conversation. We explore three methods to tackle this problem and evaluate them on SIMMC 2.1. Our best method, scene-dialogue alignment, improves the performance by ~20% F1-score compared to the SIMMC 2.1 baselines. We provide analysis and discussion regarding the limitation of our methods and the potential directions for future works. 
 
 ## Setup
 - Pull the latest `simmc2` and `detr` git submodules
@@ -6,7 +14,6 @@
 ```
 pip install -r requirements.txt
 ```
-
 
 ## File Structure
 - git submodules
@@ -25,6 +32,7 @@ pip install -r requirements.txt
     - utils.py -> common utility functions
 - contextualized_object_detection_finetuning.py -> fine-tuning script for the SitCoM-DETR model
 - contextualized_object_detection_prediction.py -> prediction script for the SitCoM-DETR model
+- mdetr_zero_shot.py -> zero-shot prediction script for MDETR
 - object_detection_finetuning.py -> fine-tuning script for the DETR-based model
 - object_detection_prediction.py -> prediction script for the DETR-based model
 - conv_image_alignment_finetuning.py -> fine-tuning script for the CLIP-based model using conversation data
@@ -34,7 +42,7 @@ pip install -r requirements.txt
 - *.ipynb -> notebook files for sandbox and visualization
 
 ## Experiment Results
-All experiment results are recorded on the following [Google Sheet](https://docs.google.com/spreadsheets/d/15QKo25eOP3GKPECHErpFg6pEEyB824fYTw24o8NplgM/edit?usp=sharing)
+All experiment results are recorded on the following [Google Sheets](https://docs.google.com/spreadsheets/d/15QKo25eOP3GKPECHErpFg6pEEyB824fYTw24o8NplgM/edit?usp=sharing).
 
 ## LICENSE
 The source code for the site is licensed under the MIT license, which you can find in the [LICENSE](LICENSE) file.
