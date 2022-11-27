@@ -1,10 +1,10 @@
 CUDA_VISIBLE_DEVICES=1 python object_detection_finetuning.py \
-    --output_dir="./save/test/obj-det" \
-    --cache_dir="./cache/test/obj-det" \
+    --output_dir="./save/obj-det" \
+    --cache_dir="./cache/obj-det" \
     --model_name_or_path="facebook/detr-resnet-50" \
-    --train_dataset_path="./preprocessed_data/coref_candidates/simmc2.1_coref_candidates_dstc11_train.json" \
-    --dev_dataset_path="./preprocessed_data/coref_candidates/simmc2.1_coref_candidates_dstc11_dev.json" \
-    --devtest_dataset_path="./preprocessed_data/coref_candidates/simmc2.1_coref_candidates_dstc11_devtest.json" \
+    --train_dataset_path="./preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_train.json" \
+    --dev_dataset_path="./preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_dev.json" \
+    --devtest_dataset_path="./preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_devtest.json" \
     --per_device_train_batch_size=16 \
     --per_device_eval_batch_size=16 \
     --num_train_epochs=200 \

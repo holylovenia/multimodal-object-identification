@@ -14,6 +14,9 @@ The demand for multimodal dialogue system has been rising in various domains, em
 ```
 pip install -r requirements.txt
 ```
+- To obtain the preprocessed dialogue data, run `./run_data_preprocessing.sh`
+- To obtain the preprocessed visual embeddings from DETR, run `./run_object_detection_finetuning.sh` and `./run_object_detection_prediction.sh`
+- To obtain the preprocessed visual embeddings from ResNet-50 for the SIMMC 2.1 baselines, download from the [Google Drive](https://drive.google.com/file/d/1jr7r5Yaca80W5n0hizOakTG-F1ns6BGv/view?usp=sharing) provided by the organizers, then place the file under `./preprocessed_data/visual_features/`
 
 ## File Structure
 - git submodules

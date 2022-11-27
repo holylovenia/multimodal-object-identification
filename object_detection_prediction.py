@@ -143,7 +143,7 @@ def run(model_args, data_args, training_args):
         pred_last_hidden_state = torch.index_select(outputs.last_hidden_state.squeeze(), 0, sorted_pred_indices)
         pred_boxes = torch.index_select(outputs.pred_boxes.squeeze(), 0, sorted_pred_indices)
         pred_results[MAPPING["id2scene"][batch["image_id"]] + ".png"] = torch.cat([
-            pred_last_hidden_state.detach().cpu(), pred_boxes.detach().cpu()
+            pred_last_hidden_state.detach().cpu() #, pred_boxes.detach().cpu()
         ], dim=1)
     if not os.path.exists(data_args.preprocessed_data_dir):
         os.makedirs(data_args.preprocessed_data_dir)
