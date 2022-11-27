@@ -50,7 +50,8 @@ logger = logging.getLogger(__name__)
 #####
 # Main Functions
 #####
-global split_name = 'valid'
+global split_name 
+split_name = 'valid'
 
 def run(model_args, data_args, training_args):
     training_args.output_dir="{}/{}".format(training_args.output_dir, model_args.model_name_or_path)
@@ -149,6 +150,7 @@ def run(model_args, data_args, training_args):
             example_batch['labels'][i]['all_index'] = torch.LongTensor(list(map(lambda x: x['index'], object_)))
             
         return example_batch
+    
     
     proc_datasets = deepcopy(dataset)
     proc_datasets["train"] = proc_datasets["train"].with_transform(transform)
@@ -320,7 +322,7 @@ def run(model_args, data_args, training_args):
         data_collator=collate_fn,
         train_dataset=proc_datasets["train"],
         eval_dataset=proc_datasets["valid"],
-        compute_metrics=compute_metrics,
+        # compute_metrics=compute_metrics,
         tokenizer=feature_extractor,
         callbacks=[transformers.EarlyStoppingCallback(early_stopping_patience=10)],
     )
@@ -330,6 +332,7 @@ def run(model_args, data_args, training_args):
     trainer.save_model()
 
     # Evaluation
+    trainer.compute_metrics = compute_metrics
     metrics = trainer.evaluate(proc_datasets["valid"])
     trainer.log_metrics("eval", metrics)
     trainer.save_metrics("eval", metrics)

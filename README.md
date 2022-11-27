@@ -1,32 +1,40 @@
-# ambiguous-mm-dialogue
-DSTC 11 | The Third SIMMC Challenge Track 1: Ambiguous Candidate Identification for Immersive Multimodal Conversations
+# Multimodal Object Identification in Situated Dialogue
 
-## (21 October 2022) Model performance
-
+## Setup
+- Pull the latest `simmc2` and `detr` git submodules
+- Install all required `python` dependency
 ```
-# Instances evaluated: 940
-[devtest]  Rec: 0.5630  |  Prec: 0.3860  |  F1: 0.4580
-Current best performance: {'dev': 0.48053244592346084, 'iter_id': 2119, 'epoch': 7.998112762443973, 'devtest': 0.45798619376338967}
+pip install -r requirements.txt
 ```
 
-## Important URLs
-- [DSTC 11 track proposal / SIMMC 2.1](https://drive.google.com/file/d/1_Tdl7CXm71gqlWutbOe0e8O1hhiycsQf/view)
-- [SIMMC 2.0 paper](https://arxiv.org/abs/2104.08667)
-- [SIMMC GitHub](https://github.com/facebookresearch/simmc2): including [v2.1 dataset](https://github.com/facebookresearch/simmc2/tree/main/data) used for DSTC 11, 
 
-## DSTC 11 Timeline
+## File Structure
+- git submodules
+    - simmc2
+    - detr
+- fonts -> store the fonts for visualizing detection results
+- model
+    - clipper.py -> implementation of the CLIPPER model
+    - holy_detr.py -> implementation of the SitCoM-DETR model
+    - model_utils.py -> modeling utility functions
+- trainer
+    - detr_trainer.py -> a customized HuggingFace trainer class for DETR-derived model fine-tuning
+- utils
+    - args_helper.py -> argument parser used in the main script
+    - data_utils.py -> data loading functions for various model fine-tuning formats (CLIP, DETR, SitCoM-DETR, etc)
+    - utils.py -> common utility functions
+- contextualized_object_detection_finetuning.py -> fine-tuning script for the SitCoM-DETR model
+- contextualized_object_detection_prediction.py -> prediction script for the SitCoM-DETR model
+- object_detection_finetuning.py -> fine-tuning script for the DETR-based model
+- object_detection_prediction.py -> prediction script for the DETR-based model
+- conv_image_alignment_finetuning.py -> fine-tuning script for the CLIP-based model using conversation data
+- text_image_alignment_finetuning.py -> fine-tuning script for the CLIP-based model using scene-generated text data
+- text_image_alignment_prediction.py -> prediction script for the CLIP-based model
+- run_*.sh -> all the bash scripts to run the corresponding (*) experiment
+- *.ipynb -> notebook files for sandbox and visualization
 
-| Sub-Task #1 | [Ambiguous Candidate Identification (New)](model/ambiguous_candidates) |
-|---------|---------------------------------------------------------------------------------------------------------------------------------------|
-| Goal | Given ambiguous object mentions, to resolve referent objects to thier canonical ID(s). |
-| Input | Current user utterance, Dialog context, Multimodal context |
-| Output |  Canonical object IDs |
-| Metrics | Object Identification F1 / Precision / Recall |
+## Experiment Results
+All experiment results are recorded on the following [Google Sheet](https://docs.google.com/spreadsheets/d/15QKo25eOP3GKPECHErpFg6pEEyB824fYTw24o8NplgM/edit?usp=sharing)
 
-Please check the [task input](https://github.com/facebookresearch/simmc2/blob/main/TASK_INPUTS.md) file for a full description of inputs for each subtask.
-
-## Baseline
-
-| Subtask | Name | Baseline Results | 
-| :--: | :--: | :--: |
-| #1 | Ambiguous Candidate Identification | [Link](https://github.com/facebookresearch/simmc2/blob/main/model/ambiguous_candidates#performance-on-simmc-21) |
+## LICENSE
+The source code for the site is licensed under the MIT license, which you can find in the [LICENSE](LICENSE) file.
