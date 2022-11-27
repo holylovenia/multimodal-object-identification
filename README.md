@@ -17,6 +17,7 @@ pip install -r requirements.txt
 - To obtain the preprocessed dialogue data, run `./run_data_preprocessing.sh`
 - To obtain the preprocessed visual embeddings from DETR, run `./run_object_detection_finetuning.sh` and `./run_object_detection_prediction.sh`
 - To obtain the preprocessed visual embeddings from ResNet-50 for the SIMMC 2.1 baselines, download from the [Google Drive](https://drive.google.com/file/d/1jr7r5Yaca80W5n0hizOakTG-F1ns6BGv/view?usp=sharing) provided by the organizers, then place the file under `./preprocessed_data/visual_features/`
+- To obtain all fine-tuned models, download from [this OneDrive](https://hkustconnect-my.sharepoint.com/:f:/g/personal/hlovenia_connect_ust_hk/EnRdvg5F5TxIsM8yH3iG83cBSjHAdW6_HTW29Ragwt3DLg?e=IFlBuN), then place the folder at `./save`.
 
 ## File Structure
 - git submodules
