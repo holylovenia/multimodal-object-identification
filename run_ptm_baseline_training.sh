@@ -9,14 +9,14 @@ pwd
 
 ### COREF
 
-CUDA_VISIBLE_DEVICES=0 python train_coref_model.py \
-    --train_file "/home/holy/projects/ambiguous-mm-dialogue/preprocessed_data/coref_candidates|no_mm/simmc2.1_coref_candidates_dstc11_train.json" \
-    --dev_file "/home/holy/projects/ambiguous-mm-dialogue/preprocessed_data/coref_candidates|no_mm/simmc2.1_coref_candidates_dstc11_dev.json" \
-    --devtest_file "/home/holy/projects/ambiguous-mm-dialogue/preprocessed_data/coref_candidates|no_mm/simmc2.1_coref_candidates_dstc11_devtest.json" \
-    --result_save_path "/home/holy/projects/ambiguous-mm-dialogue/results/coref_candidates|no_mm/amb-baseline_gpt2" \
-    --visual_feature_path "/home/holy/projects/ambiguous-mm-dialogue/preprocessed_data/visual_features/visual_features_resnet50_simmc2.1.pt" \
-    --visual_feature_size 516 \
-	--backbone gpt2 --use_gpu --num_epochs 10 --batch_size 16 --max_turns 3
+# CUDA_VISIBLE_DEVICES=0 python train_coref_model.py \
+#     --train_file "/home/holy/projects/ambiguous-mm-dialogue/preprocessed_data/coref_candidates|no_mm/simmc2.1_coref_candidates_dstc11_train.json" \
+#     --dev_file "/home/holy/projects/ambiguous-mm-dialogue/preprocessed_data/coref_candidates|no_mm/simmc2.1_coref_candidates_dstc11_dev.json" \
+#     --devtest_file "/home/holy/projects/ambiguous-mm-dialogue/preprocessed_data/coref_candidates|no_mm/simmc2.1_coref_candidates_dstc11_devtest.json" \
+#     --result_save_path "/home/holy/projects/ambiguous-mm-dialogue/results/coref_candidates|no_mm/amb-baseline_gpt2" \
+#     --visual_feature_path "/home/holy/projects/ambiguous-mm-dialogue/preprocessed_data/visual_features/visual_features_resnet50_simmc2.1.pt" \
+#     --visual_feature_size 516 \
+# 	--backbone gpt2 --use_gpu --num_epochs 10 --batch_size 16 --max_turns 3
 
 # CUDA_VISIBLE_DEVICES=3 python train_coref_model.py \
 #     --train_file "/home/holy/projects/ambiguous-mm-dialogue/preprocessed_data/coref_candidates|no_mm/simmc2.1_coref_candidates_dstc11_train.json" \
@@ -47,20 +47,20 @@ CUDA_VISIBLE_DEVICES=0 python train_coref_model.py \
 
 #### AMBIGUOUS
 
-# CUDA_VISIBLE_DEVICES=0 python train_model.py \
-#     --train_file "/home/holy/projects/ambiguous-mm-dialogue/preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_train.json" \
-#     --dev_file "/home/holy/projects/ambiguous-mm-dialogue/preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_dev.json" \
-#     --devtest_file "/home/holy/projects/ambiguous-mm-dialogue/preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_devtest.json" \
-#     --result_save_path "/home/holy/projects/ambiguous-mm-dialogue/results/ambiguous-candidates/detr_gpt2" \
-#     --visual_feature_path "/home/holy/projects/ambiguous-mm-dialogue/preprocessed_data/visual_features/visual_features_detr.pt" \
-#     --visual_feature_size 260 \
-# 	--backbone gpt2 --use_gpu --num_epochs 10 --batch_size 16 --max_turns 3
+CUDA_VISIBLE_DEVICES=0 python train_model.py \
+    --train_file "/home/holy/projects/ambiguous-mm-dialogue/preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_train.json" \
+    --dev_file "/home/holy/projects/ambiguous-mm-dialogue/preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_dev.json" \
+    --devtest_file "/home/holy/projects/ambiguous-mm-dialogue/preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_devtest.json" \
+    --result_save_path "/home/holy/projects/ambiguous-mm-dialogue/results/ambiguous-candidates/detr_gpt2_no_bbox" \
+    --visual_feature_path "/home/holy/projects/ambiguous-mm-dialogue/preprocessed_data/visual_features/visual_features_detr_no_bbox.pt" \
+    --visual_feature_size 256 \
+	--backbone gpt2 --use_gpu --num_epochs 10 --batch_size 16 --max_turns 3
 
 # CUDA_VISIBLE_DEVICES=1 python train_model.py \
 #     --train_file "/home/holy/projects/ambiguous-mm-dialogue/preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_train.json" \
 #     --dev_file "/home/holy/projects/ambiguous-mm-dialogue/preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_dev.json" \
 #     --devtest_file "/home/holy/projects/ambiguous-mm-dialogue/preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_devtest.json" \
-#     --result_save_path "/home/holy/projects/ambiguous-mm-dialogue/results/ambiguous-candidates/detr_bert" \
-#     --visual_feature_path "/home/holy/projects/ambiguous-mm-dialogue/preprocessed_data/visual_features/visual_features_detr.pt" \
-#     --visual_feature_size 260 \
+#     --result_save_path "/home/holy/projects/ambiguous-mm-dialogue/results/ambiguous-candidates/detr_bert_no_bbox" \
+#     --visual_feature_path "/home/holy/projects/ambiguous-mm-dialogue/preprocessed_data/visual_features/visual_features_detr_no_bbox.pt" \
+#     --visual_feature_size 256 \
 # 	--backbone bert --use_gpu --num_epochs 10 --batch_size 16 --max_turns 3

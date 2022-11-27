@@ -1,5 +1,8 @@
 CUDA_VISIBLE_DEVICES=0 python object_detection_prediction.py \
     --output_dir="./save/obj-det" \
+    --train_dataset_path='./preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_train.json' \
+    --dev_dataset_path='./preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_dev.json' \
+    --devtest_dataset_path='./preprocessed_data/ambiguous_candidates/simmc2.1_ambiguous_candidates_dstc11_devtest.json' \
     --cache_dir="./cache/obj-det" \
     --model_name_or_path="./save/obj-det/facebook/detr-resnet-50/checkpoint-1160" \
     --per_device_train_batch_size=1 \

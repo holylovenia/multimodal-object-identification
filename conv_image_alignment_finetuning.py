@@ -90,6 +90,7 @@ def run(model_args, data_args, training_args):
 
     # Preprocessing
     tokenizer = transformers.AutoTokenizer.from_pretrained(model_args.model_name_or_path)
+    tokenizer.add_special_tokens({"additional_special_tokens": ["<USER>", "<SYS>"]})
     if data_args.additional_special_token_path is not None and os.path.isfile(data_args.additional_special_token_path):
         with open(data_args.additional_special_token_path, "rb") as handle:
             special_tokens_dict = json.load(handle)
