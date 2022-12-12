@@ -1,6 +1,9 @@
 import datasets
 import json
+import numpy as np
 import os
+import PIL
+import torch
 
 ###
 # Load Object Categories in SIMMC Dataset
@@ -492,3 +495,150 @@ def load_sitcom_detr_dataset(
         return dset, gold_data
     else:
         return dset
+
+
+class Dataloader:
+    def __init__(
+        self, tokenizer, load_path, args, hidden_labels=False,
+        img_dir_paths=[
+            "./simmc2/data/simmc2_scene_images_dstc10_public_part1",
+            "./simmc2/data/simmc2_scene_images_dstc10_public_part2"],
+        scene_dir_path="./simmc2/data/public"):
+        self._tokenizer = tokenizer
+        # self._features = feature_loader
+        self._args = args
+        self._hidden_labels = hidden_labels
+        self._img_dir_paths = img_dir_paths
+        self._scene_dir_path = scene_dir_path
+        print("Loading: {}".format(load_path))
+        with open(load_path, "r") as file_id:
+            self._raw_data = json.load(file_id)
+        # Also read the source data for evaluation.
+        with open(self._raw_data["source_path"], "r") as file_id:
+            self.source_data = json.load(file_id)
+        self._data = self._raw_data["data"]
+
+        self.num_utterances = 2 * args.max_turns + 1
+        self.num_instances = len(self._data)
+
+    def get_random_batch(self, batch_size):
+        indices = np.random.randint(0, self.num_instances, batch_size)
+        return self.get_indexed_data(indices)
+
+    def get_entire_batch(self, batch_size):
+        all_indices = np.arange(self.num_instances)
+        for start in all_indices[::batch_size]:
+            batch_indices = all_indices[start : start + batch_size]
+            yield self.get_indexed_data(batch_indices)
+
+    def get_indexed_data(self, indices):
+        text_labels = []
+        text_inputs = []
+        dialog_ids = []
+        turn_ids = []
+        # features = []
+        object_maps = []
+        object_annotations = []
+        scene_image_paths = []
+        scene_images = []
+        for index in indices:
+            # Add <USER> and <SYS> tokens.
+            dialog_datum = self._data[index]
+            dialog = self._data[index]["input_text"]
+            for turn_id, turn in enumerate(dialog):
+                if turn_id % 2 == 0:
+                    dialog[turn_id] = "<USER> " + turn
+                else:
+                    dialog[turn_id] = "<SYS> " + turn
+            text = " ".join(dialog[-self.num_utterances :])
+            text_inputs.append(text)
+            dialog_ids.append(dialog_datum["dialog_id"])
+            turn_ids.append(dialog_datum["turn_id"])
+            object_map = dialog_datum["object_map"]
+            scene_image_name = dialog_datum["image_name"]
+            # # Get image features.
+            # if self._features:
+            #     features.append(self._features[dialog_datum["image_name"]])
+            #     num_candidates = features[-1].shape[0]
+            # else:
+            num_candidates = len(object_map)
+
+            # Get the ambiguous candidates and map it local ids.
+            global_ambiguous_candidates = dialog_datum["ambiguous_candidates"]
+            for candidate in global_ambiguous_candidates:
+                if candidate not in object_map:
+                    object_map.append(candidate)
+            local_ambiguous_candidates = [
+                object_map.index(ii) for ii in global_ambiguous_candidates
+            ]
+            # NOTE: Few scenes have misaligned image features (ignore them).
+            # Default object map to linear local ids in such cases.
+            if len(object_map) != num_candidates:
+                local_ambiguous_candidates = global_ambiguous_candidates
+                object_map = list(range(num_candidates))
+
+            img_file_path = os.path.join(self._img_dir_paths[0], scene_image_name)
+            if not os.path.exists(img_file_path):
+                img_file_path = os.path.join(self._img_dir_paths[1], scene_image_name)
+            scene_id = scene_image_name.split(".")[0]
+
+            if os.path.exists(f"{self._scene_dir_path}/{scene_id}_scene.json"):
+                scene_file_path = f"{self._scene_dir_path}/{scene_id}_scene.json"
+            elif os.path.exists(f"{self._scene_dir_path}/m_{scene_id}_scene.json"):
+                scene_file_path = f"{self._scene_dir_path}/m_{scene_id}_scene.json"
+                
+            if os.path.isfile(scene_file_path):
+                scene_image_paths.append(img_file_path)
+                scene_image = PIL.Image.open(img_file_path)
+                scene_images.append(scene_image)
+
+                width, height = scene_image.size
+                area = width * height
+                
+                scene_json = json.loads(open(scene_file_path).read())
+                scene_objects = scene_json["scenes"][0]["objects"]
+
+                object_annotation = [{
+                    "bbox": [float(b) for b in scene_object["bbox"]],
+                    "id": scene_object["unique_id"],
+                    "area": area,
+                    "segmentation": [],
+                    "iscrowd": False,
+                } for scene_object in scene_objects]
+
+            object_maps.append(object_map)
+            object_annotations.append(object_annotation)
+            label = torch.tensor(
+                [
+                    1 if ii in local_ambiguous_candidates else 0
+                    for ii in range(num_candidates)
+                ],
+                dtype=torch.float32,
+            )
+            text_labels.append(label)
+
+        encoded_inputs = self._tokenizer(
+            text_inputs,
+            padding=True,
+            max_length=self._args.max_seq_length,
+            return_tensors="pt",
+            truncation=True,
+        )
+        encoded_inputs = {key: val.detach() for key, val in encoded_inputs.items()}
+        if self._hidden_labels:
+            # Reset all the text_labels to [0] (dummy labels).
+            text_labels = [[0] for ii in text_labels]
+
+        # Pack the batch.
+        batch = {
+            "text_in": encoded_inputs,
+            "gt_label": text_labels,
+            "dialog_id": dialog_ids,
+            "turn_id": turn_ids,
+            # "features": features,
+            "object_map": object_maps,
+            "object_annotation": object_annotations,
+            "scene_image_path": scene_image_paths,
+            "scene_image": scene_images,
+        }
+        return batch

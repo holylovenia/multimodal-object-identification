@@ -11,8 +11,11 @@ class ModelArguments:
         default="gpt2", metadata={"help": "The path of the HuggingFace model."}
     )    
     text_model_name_or_path: Optional[str] = field(
-        default="roberta-base", metadata={"help": "The path of the HuggingFace text model for SitCoM-DETR."}
-    )   
+        default="bert-base-uncased", metadata={"help": "The path of the HuggingFace text model for language model."}
+    )
+    vision_model_name_or_path: Optional[str] = field(
+        default="facebook/detr-resnet-50", metadata={"help": "The path of the HuggingFace vision model for object detection."}
+    )
     checkpoint_path: Optional[str] = field(
         default=None, metadata={"help": "The path of the checkpoint of SitCoM-DETR."}
     )
@@ -21,6 +24,10 @@ class ModelArguments:
     )
     include_other_referred_objects: Optional[bool] = field(
         default=False, metadata={"help": "Whether to include other referred objects or not"}
+    )
+    positive_weight: Optional[float] = field(
+        default=1.0,
+        metadata={"help": "Weight for positive examples for class imbalance"},
     )
     
 
@@ -62,6 +69,9 @@ class DataArguments:
     utterance_turn: Optional[str] = field(
         default='both'
     )
+    max_turns: Optional[int] = field(
+        default = 5,
+    )
     prediction_path: Optional[str] = field(
         default=None
     )
@@ -81,4 +91,8 @@ class TrainingArguments(TrainingArguments):
     eval_accumulation_steps: Optional[int] = field(
         default=1,
         metadata={"help": "Evaluation accumulation steps"}
+    )
+    adam_epsilon: Optional[float] = field(
+        default=1e-8,
+        metadata={"help": "Eps for Adam optimizer"},
     )
